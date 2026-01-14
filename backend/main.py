@@ -1,13 +1,3 @@
-from fastapi import FastAPI
+from backend.app.main import app
 
-app = FastAPI(title="TNChatbot API")
-
-
-@app.get("/health")
-def health() -> dict:
-    return {"status": "ok"}
-
-
-@app.get("/")
-def root() -> dict:
-    return {"message": "TNChatbot backend is running"}
+__all__ = ["app"]
