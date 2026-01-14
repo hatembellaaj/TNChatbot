@@ -6,6 +6,10 @@ import psycopg
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from app.llm.client import LLMClientError, call_llm
+from app.llm.prompts import build_messages
+from app.llm.validator import build_fallback_response, validate_or_fallback
+
 DEFAULT_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/postgres"
 DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 
@@ -16,18 +20,10 @@ class ChatSessionCreateResponse(BaseModel):
     session_id: str
 
 
-class ChatState(BaseModel):
-    step: str
-
-
-class ChatContext(BaseModel):
-    page: str | None = None
-
-
 class ChatMessageRequest(BaseModel):
     session_id: str
     user_message: str
-    state: ChatState
+    state: Dict[str, Any]
     context: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -38,8 +34,11 @@ class ChatButton(BaseModel):
 
 class ChatMessageResponse(BaseModel):
     assistant_message: str
-    state: ChatState
     buttons: List[ChatButton]
+    suggested_next_step: str
+    slot_updates: Dict[str, Any]
+    handoff: Dict[str, Any]
+    safety: Dict[str, Any]
 
 
 def get_connection() -> psycopg.Connection:
@@ -87,7 +86,28 @@ def create_chat_session() -> ChatSessionCreateResponse:
 
 @app.post("/api/chat/message", response_model=ChatMessageResponse)
 def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
-    next_step = "MAIN_MENU"
+    allowed_buttons = payload.context.get("allowed_buttons", ["CALL_BACK"])
+    form_schema = payload.context.get("form_schema", {})
+    config = payload.context.get("config", {})
+    rag_context = payload.context.get("rag_context", "")
+    step = payload.state.get("step", "UNKNOWN")
+
+    messages = build_messages(
+        step=step,
+        allowed_buttons=allowed_buttons,
+        form_schema=form_schema,
+        config=config,
+        rag_context=rag_context,
+        user_message=payload.user_message,
+    )
+
+    try:
+        llm_response = call_llm(messages)
+        validated = validate_or_fallback(llm_response, allowed_buttons)
+    except LLMClientError:
+        validated = build_fallback_response()
+
+    next_step = validated.get("suggested_next_step", "MAIN_MENU")
     with get_connection() as conn:
         result = conn.execute(
             "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
@@ -96,13 +116,11 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="Session not found")
 
-    response = ChatMessageResponse(
-        assistant_message=(
-            "Bonjour ! Voici ce que je peux vous proposer pour commencer."
-        ),
-        state=ChatState(step=next_step),
-        buttons=[
-            ChatButton(id="M_AUDIENCE", label="📊 Découvrir notre audience"),
-        ],
+    return ChatMessageResponse(
+        assistant_message=validated["assistant_message"],
+        buttons=[ChatButton(**button) for button in validated["buttons"]],
+        suggested_next_step=validated["suggested_next_step"],
+        slot_updates=validated["slot_updates"],
+        handoff=validated["handoff"],
+        safety=validated["safety"],
     )
-    return response
