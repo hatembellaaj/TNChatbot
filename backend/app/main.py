@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 from typing import Any, Dict, List
@@ -9,11 +10,18 @@ from pydantic import BaseModel, Field
 from app.llm.client import LLMClientError, call_llm
 from app.llm.prompts import build_messages
 from app.llm.validator import build_fallback_response, validate_or_fallback
+from app.rag.retrieve import (
+    build_config,
+    is_factual_question,
+    retrieve_rag_context,
+    should_trigger_rag,
+)
 
 DEFAULT_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/postgres"
 DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 
 app = FastAPI(title="TNChatbot API")
+LOGGER = logging.getLogger(__name__)
 
 
 class ChatSessionCreateResponse(BaseModel):
@@ -88,9 +96,25 @@ def create_chat_session() -> ChatSessionCreateResponse:
 def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
     allowed_buttons = payload.context.get("allowed_buttons", ["CALL_BACK"])
     form_schema = payload.context.get("form_schema", {})
-    config = payload.context.get("config", {})
+    config = build_config(payload.context.get("config"))
     rag_context = payload.context.get("rag_context", "")
     step = payload.state.get("step", "UNKNOWN")
+    intent = payload.state.get("intent") or payload.context.get("intent")
+
+    rag_triggered = should_trigger_rag(intent, payload.user_message)
+    if rag_triggered:
+        try:
+            retrieved_context = retrieve_rag_context(payload.user_message)
+            rag_context = "\n\n".join(
+                [context for context in (rag_context, retrieved_context) if context]
+            )
+        except Exception as exc:  # noqa: BLE001 - log and continue with empty context
+            LOGGER.warning("RAG retrieval failed", exc_info=exc)
+        LOGGER.info("rag_used=true intent=%s", intent or "unknown")
+
+    rag_empty_factual = (
+        rag_triggered and not rag_context and is_factual_question(payload.user_message)
+    )
 
     messages = build_messages(
         step=step,
@@ -98,6 +122,7 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
         form_schema=form_schema,
         config=config,
         rag_context=rag_context,
+        rag_empty_factual=rag_empty_factual,
         user_message=payload.user_message,
     )
 
