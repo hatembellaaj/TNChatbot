@@ -1,17 +1,17 @@
 import asyncio
 import json
 import logging
-import os
 import re
 import time
 import uuid
 from typing import Any, Dict, List
 
-import psycopg
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.db import get_connection
+from app.leads import router as leads_router
 from app.llm.client import LLMClientError, call_llm
 from app.llm.prompts import build_messages
 from app.llm.validator import build_fallback_response, validate_or_fallback
@@ -21,9 +21,6 @@ from app.rag.retrieve import (
     retrieve_rag_context,
     should_trigger_rag,
 )
-
-DEFAULT_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/postgres"
-DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 
 app = FastAPI(title="TNChatbot API")
 LOGGER = logging.getLogger(__name__)
@@ -61,10 +58,6 @@ class ChatStreamFinal(BaseModel):
     buttons: List[ChatButton]
 
 
-def get_connection() -> psycopg.Connection:
-    return psycopg.connect(DATABASE_URL)
-
-
 def initialize_db() -> None:
     with get_connection() as conn:
         conn.execute(
@@ -81,6 +74,9 @@ def initialize_db() -> None:
 @app.on_event("startup")
 def on_startup() -> None:
     initialize_db()
+
+
+app.include_router(leads_router)
 
 
 @app.get("/health")
