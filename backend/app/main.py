@@ -1,10 +1,15 @@
+import asyncio
+import json
 import logging
 import os
+import re
+import time
 import uuid
 from typing import Any, Dict, List
 
 import psycopg
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.llm.client import LLMClientError, call_llm
@@ -22,6 +27,7 @@ DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 
 app = FastAPI(title="TNChatbot API")
 LOGGER = logging.getLogger(__name__)
+PING_INTERVAL_SECONDS = 15
 
 
 class ChatSessionCreateResponse(BaseModel):
@@ -47,6 +53,12 @@ class ChatMessageResponse(BaseModel):
     slot_updates: Dict[str, Any]
     handoff: Dict[str, Any]
     safety: Dict[str, Any]
+
+
+class ChatStreamFinal(BaseModel):
+    assistant_message: str
+    state: Dict[str, Any]
+    buttons: List[ChatButton]
 
 
 def get_connection() -> psycopg.Connection:
@@ -149,3 +161,109 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
         handoff=validated["handoff"],
         safety=validated["safety"],
     )
+
+
+def _format_sse(event: str, data: Dict[str, Any]) -> str:
+    payload = json.dumps(data, ensure_ascii=False)
+    return f"event: {event}\ndata: {payload}\n\n"
+
+
+def _tokenize_message(message: str) -> List[str]:
+    return re.findall(r"\S+\s*", message)
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
+    allowed_buttons = payload.context.get("allowed_buttons", ["CALL_BACK"])
+    form_schema = payload.context.get("form_schema", {})
+    config = build_config(payload.context.get("config"))
+    rag_context = payload.context.get("rag_context", "")
+    step = payload.state.get("step", "UNKNOWN")
+    intent = payload.state.get("intent") or payload.context.get("intent")
+
+    rag_triggered = should_trigger_rag(intent, payload.user_message)
+    if rag_triggered:
+        try:
+            retrieved_context = retrieve_rag_context(payload.user_message)
+            rag_context = "\n\n".join(
+                [context for context in (rag_context, retrieved_context) if context]
+            )
+        except Exception as exc:  # noqa: BLE001 - log and continue with empty context
+            LOGGER.warning("RAG retrieval failed", exc_info=exc)
+        LOGGER.info("rag_used=true intent=%s", intent or "unknown")
+
+    rag_empty_factual = (
+        rag_triggered and not rag_context and is_factual_question(payload.user_message)
+    )
+
+    messages = build_messages(
+        step=step,
+        allowed_buttons=allowed_buttons,
+        form_schema=form_schema,
+        config=config,
+        rag_context=rag_context,
+        rag_empty_factual=rag_empty_factual,
+        user_message=payload.user_message,
+    )
+
+    async def event_stream() -> Any:
+        route = "rag" if rag_triggered else "direct"
+        yield _format_sse(
+            "meta",
+            {
+                "route": route,
+                "rag_empty_factual": rag_empty_factual,
+            },
+        )
+
+        llm_error = None
+        llm_start = time.monotonic()
+        llm_task = asyncio.create_task(asyncio.to_thread(call_llm, messages))
+
+        while not llm_task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(llm_task), timeout=PING_INTERVAL_SECONDS)
+            except asyncio.TimeoutError:
+                yield _format_sse("ping", {"ts": time.time()})
+
+        try:
+            llm_response = await llm_task
+            validated = validate_or_fallback(llm_response, allowed_buttons)
+        except LLMClientError as exc:
+            llm_error = str(exc)
+            validated = build_fallback_response()
+
+        if llm_error:
+            yield _format_sse("error", {"message": llm_error})
+
+        next_step = validated.get("suggested_next_step", "MAIN_MENU")
+        with get_connection() as conn:
+            result = conn.execute(
+                "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
+                (next_step, payload.session_id),
+            )
+            if result.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Session not found")
+
+        assistant_message = validated["assistant_message"]
+        for token in _tokenize_message(assistant_message):
+            yield _format_sse("token", {"value": token})
+
+        state_payload = {
+            "step": next_step,
+            "slot_updates": validated["slot_updates"],
+            "handoff": validated["handoff"],
+            "safety": validated["safety"],
+            "suggested_next_step": validated["suggested_next_step"],
+            "latency_ms": int((time.monotonic() - llm_start) * 1000),
+        }
+        yield _format_sse(
+            "final",
+            ChatStreamFinal(
+                assistant_message=assistant_message,
+                state=state_payload,
+                buttons=[ChatButton(**button) for button in validated["buttons"]],
+            ).model_dump(),
+        )
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
