@@ -22,6 +22,41 @@ cd infra
 - Backend : http://localhost:8000
 - Frontend : http://localhost:3000
 
+## Schéma (flux ingestion & RAG)
+
+```mermaid
+flowchart LR
+    subgraph Docker["Stack Docker Compose"]
+        FE[frontend<br/>Next.js]
+        BE[backend<br/>FastAPI]
+        PG[postgres<br/>metadata RAG]
+        QD[qdrant<br/>vecteurs RAG]
+        LLM[llm<br/>placeholder nginx]
+    end
+
+    subgraph Sources["Sources d'ingestion"]
+        KB[kb_sources/*.md|.txt]
+    end
+
+    subgraph External["Services externes"]
+        EMB[Embedding API<br/>(EMBEDDING_URL)]
+    end
+
+    %% Ingestion
+    KB -->|"ingest.py: lecture + chunking"| BE
+    BE -->|"embeddings"| EMB
+    BE -->|"chunks + métadonnées"| PG
+    BE -->|"points vecteurisés"| QD
+
+    %% RAG runtime
+    FE -->|"question utilisateur"| BE
+    BE -->|"embedding requête"| EMB
+    BE -->|"recherche top-k"| QD
+    QD -->|"chunks pertinents"| BE
+    BE -->|"prompt + contexte RAG"| LLM
+    BE -->|"réponse"| FE
+```
+
 ## Variables d'environnement
 
 Les variables suivantes sont attendues (voir `.env.example`) :
