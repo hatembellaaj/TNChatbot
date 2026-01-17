@@ -34,7 +34,7 @@ services:
       SMTP_TO: ${SMTP_TO:-ops@example.com}
       EXPORT_MODE: ${EXPORT_MODE:-NONE}
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     depends_on:
       - postgres
       - qdrant
@@ -44,7 +44,7 @@ services:
     build:
       context: ../frontend
     environment:
-      NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8000}
+      NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://localhost:${BACKEND_PORT:-8000}}
     ports:
       - "3000:3000"
     depends_on:
