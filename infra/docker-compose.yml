@@ -34,7 +34,7 @@ services:
       SMTP_TO: ${SMTP_TO:-ops@example.com}
       EXPORT_MODE: ${EXPORT_MODE:-NONE}
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     depends_on:
       - postgres
       - qdrant
