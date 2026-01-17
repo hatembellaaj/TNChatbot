@@ -8,14 +8,14 @@ services:
       POSTGRES_PASSWORD: tnchatbot
       POSTGRES_DB: tnchatbot
     ports:
-      - "15432:5432"
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
   qdrant:
     image: qdrant/qdrant:latest
     ports:
-      - "16333:6333"
+      - "6333:6333"
     volumes:
       - qdrant_data:/qdrant/storage
 
@@ -34,7 +34,7 @@ services:
       SMTP_TO: ${SMTP_TO:-ops@example.com}
       EXPORT_MODE: ${EXPORT_MODE:-NONE}
     ports:
-      - "19081:8000"
+      - "8000:8000"
     depends_on:
       - postgres
       - qdrant
@@ -46,14 +46,14 @@ services:
     environment:
       NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8000}
     ports:
-      - "19080:3000"
+      - "3000:3000"
     depends_on:
       - backend
 
   llm:
     image: nginx:alpine
     ports:
-      - "19090:8000"
+      - "8001:8000"
     command: ["nginx", "-g", "daemon off;"]
 
 volumes:
