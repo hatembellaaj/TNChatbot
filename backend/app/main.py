@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.admin import load_admin_config, router as admin_router
 from app.db import get_connection
 from app.leads import router as leads_router
 from app.llm.client import LLMClientError, call_llm
@@ -77,6 +78,7 @@ def on_startup() -> None:
 
 
 app.include_router(leads_router)
+app.include_router(admin_router)
 
 
 @app.get("/health")
@@ -104,7 +106,9 @@ def create_chat_session() -> ChatSessionCreateResponse:
 def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
     allowed_buttons = payload.context.get("allowed_buttons", ["CALL_BACK"])
     form_schema = payload.context.get("form_schema", {})
-    config = build_config(payload.context.get("config"))
+    admin_config = load_admin_config()
+    context_config = payload.context.get("config") or {}
+    config = build_config({**admin_config, **context_config})
     rag_context = payload.context.get("rag_context", "")
     step = payload.state.get("step", "UNKNOWN")
     intent = payload.state.get("intent") or payload.context.get("intent")
@@ -172,7 +176,9 @@ def _tokenize_message(message: str) -> List[str]:
 async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
     allowed_buttons = payload.context.get("allowed_buttons", ["CALL_BACK"])
     form_schema = payload.context.get("form_schema", {})
-    config = build_config(payload.context.get("config"))
+    admin_config = load_admin_config()
+    context_config = payload.context.get("config") or {}
+    config = build_config({**admin_config, **context_config})
     rag_context = payload.context.get("rag_context", "")
     step = payload.state.get("step", "UNKNOWN")
     intent = payload.state.get("intent") or payload.context.get("intent")
