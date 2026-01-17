@@ -49,10 +49,13 @@ FACTUAL_TOKENS = {
     "formats",
 }
 
-DEFAULT_AUDIENCE_ADMIN_CONFIG = {
-    "audience_admin": {
+DEFAULT_ADMIN_CONFIG = {
+    "audience_metrics": {
         "note": "Renseigner les chiffres audience côté admin.",
-    }
+    },
+    "offers_copy": {},
+    "email_config": {},
+    "sectors": [],
 }
 
 
@@ -144,15 +147,17 @@ def is_factual_question(user_message: str) -> bool:
 
 def build_config(base_config: dict | None) -> dict:
     config = dict(base_config or {})
-    if "audience_admin" not in config:
-        env_config = os.getenv("AUDIENCE_ADMIN_CONFIG")
+    if "audience_metrics" not in config:
+        env_config = os.getenv("AUDIENCE_METRICS_CONFIG")
         if env_config:
             try:
-                config["audience_admin"] = json.loads(env_config)
+                config["audience_metrics"] = json.loads(env_config)
             except json.JSONDecodeError:
-                LOGGER.warning("AUDIENCE_ADMIN_CONFIG is not valid JSON")
+                LOGGER.warning("AUDIENCE_METRICS_CONFIG is not valid JSON")
         else:
-            config.update(DEFAULT_AUDIENCE_ADMIN_CONFIG)
+            config["audience_metrics"] = DEFAULT_ADMIN_CONFIG["audience_metrics"]
+    for key, default_value in DEFAULT_ADMIN_CONFIG.items():
+        config.setdefault(key, default_value)
     return config
 
 
