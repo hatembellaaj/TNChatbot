@@ -4,8 +4,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import styles from "./page.module.css";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const resolveApiBase = () => {
+  if (process.env.NEXT_PUBLIC_BACKEND_URL) {
+    return process.env.NEXT_PUBLIC_BACKEND_URL;
+  }
+  if (process.env.NEXT_PUBLIC_API_BASE_URL) {
+    return process.env.NEXT_PUBLIC_API_BASE_URL;
+  }
+  if (typeof window !== "undefined") {
+    const { protocol, hostname } = window.location;
+    return `${protocol}//${hostname}:19081`;
+  }
+  return "http://localhost:8000";
+};
 
 type ChatButton = {
   id: string;
@@ -57,6 +68,7 @@ const budgets = [
 ];
 
 export default function Home() {
+  const apiBase = useMemo(() => resolveApiBase(), []);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatState, setChatState] = useState<ChatState>(initialState);
@@ -81,7 +93,7 @@ export default function Home() {
     initRef.current = true;
     const bootstrap = async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/chat/session`, {
+        const response = await fetch(`${apiBase}/api/chat/session`, {
           method: "POST",
         });
         if (!response.ok) {
@@ -136,7 +148,7 @@ export default function Home() {
       return;
     }
 
-    const response = await fetch(`${API_BASE}/api/chat/message`, {
+    const response = await fetch(`${apiBase}/api/chat/message`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -210,7 +222,7 @@ export default function Home() {
     setIsStreaming(true);
 
     try {
-      const response = await fetch(`${API_BASE}/api/chat/stream`, {
+      const response = await fetch(`${apiBase}/api/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
