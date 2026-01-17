@@ -56,7 +56,7 @@ def build_messages(
         form_schema=form_schema,
         config=config,
         rag_context=rag_context,
-        rag_empty_factual=\"oui\" if rag_empty_factual else \"non\",
+        rag_empty_factual="oui" if rag_empty_factual else "non",
     )
 
     return [
