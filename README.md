@@ -20,7 +20,7 @@ cd infra
 ## Services exposés
 
 - Backend : http://localhost:8000 (ou `BACKEND_PORT`)
-- Frontend : http://localhost:3000
+- Frontend : http://localhost:3000 (ou `FRONTEND_PORT`)
 
 ## Schéma (flux ingestion & RAG)
 
@@ -64,7 +64,9 @@ Les variables suivantes sont attendues (voir `.env.example`) :
 - `DATABASE_URL`
 - `QDRANT_URL`
 - `LLM_URL`
-- `BACKEND_PORT` (optionnel, change le port hôte du backend et sert à `NEXT_PUBLIC_BACKEND_URL` par défaut)
+- `BACKEND_PORT` (optionnel, change le port hôte du backend)
+- `FRONTEND_PORT` (optionnel, change le port hôte du frontend)
+- `NEXT_PUBLIC_BACKEND_URL` (optionnel, URL publique du backend pour le navigateur, sinon le frontend utilise l'hôte courant + `BACKEND_PORT`)
 - `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` / `SMTP_TO`
 - `EXPORT_MODE` (`NONE|SHEET|CRM_WEBHOOK`)
 
