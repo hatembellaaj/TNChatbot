@@ -34,11 +34,14 @@ const forwardRequest = async (request: Request, path: string) => {
   const body =
     request.method === "GET" || request.method === "HEAD"
       ? undefined
-      : request.body ?? (await request.text());
+      : await request.text();
 
   const headers = new Headers(request.headers);
   headers.delete("host");
   headers.delete("content-length");
+  if (!headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
   headers.set(
     "x-forwarded-host",
     request.headers.get("host") ?? "unknown",
@@ -48,7 +51,6 @@ const forwardRequest = async (request: Request, path: string) => {
     method: request.method,
     headers,
     body,
-    duplex: "half",
   });
 
   const responseHeaders = new Headers();
