@@ -241,7 +241,7 @@ export default function Home() {
       apiBaseOverride?: string;
     },
   ) => {
-    if (!sessionId || isStreaming) {
+    if (!sessionId || isStreaming || !apiBase) {
       return;
     }
 
