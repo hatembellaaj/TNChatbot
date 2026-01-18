@@ -120,12 +120,19 @@ export default function Home() {
               method: "POST",
             });
             if (!response.ok) {
+              console.warn(
+                `[TNChatbot] Session init failed for ${candidate} (status ${response.status}).`,
+              );
               continue;
             }
             payload = (await response.json()) as { session_id: string };
             resolvedBase = candidate;
             break;
           } catch (candidateError) {
+            console.warn(
+              `[TNChatbot] Session init error for ${candidate}.`,
+              candidateError,
+            );
             continue;
           }
         }
@@ -143,7 +150,14 @@ export default function Home() {
           apiBaseOverride: resolvedBase,
         });
       } catch (err) {
-        setError("Session backend indisponible. Réessayez plus tard.");
+        const message =
+          err instanceof Error
+            ? err.message
+            : "Erreur inconnue lors de l'initialisation.";
+        console.error("[TNChatbot] Session bootstrap failed.", err);
+        setError(
+          `Session backend indisponible. Réessayez plus tard. (${message})`,
+        );
       }
     };
 
@@ -207,6 +221,9 @@ export default function Home() {
     });
 
     if (!response.ok) {
+      console.warn(
+        `[TNChatbot] Fallback request failed (${response.status}) on ${resolvedApiBase}.`,
+      );
       throw new Error("Impossible de récupérer une réponse.");
     }
 
@@ -392,7 +409,12 @@ export default function Home() {
           resolvedApiBase,
         );
       } catch (fallbackError) {
-        setError("Impossible de contacter le backend.");
+        const message =
+          fallbackError instanceof Error
+            ? fallbackError.message
+            : "Erreur inconnue côté backend.";
+        console.error("[TNChatbot] Fallback request failed.", fallbackError);
+        setError(`Impossible de contacter le backend. (${message})`);
         updateMessage(assistantId, (message) => ({
           ...message,
           content: "Oups, le backend ne répond pas.",
