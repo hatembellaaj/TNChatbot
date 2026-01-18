@@ -7,6 +7,7 @@ import uuid
 from typing import Any, Dict, List
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -26,6 +27,13 @@ from app.rag.retrieve import (
 app = FastAPI(title="TNChatbot API")
 LOGGER = logging.getLogger(__name__)
 PING_INTERVAL_SECONDS = 15
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class ChatSessionCreateResponse(BaseModel):
