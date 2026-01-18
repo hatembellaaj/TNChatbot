@@ -13,18 +13,9 @@ const resolveApiBases = () => {
     bases.push(process.env.NEXT_PUBLIC_API_BASE_URL);
   }
   if (typeof window !== "undefined") {
-    const { origin, protocol, hostname, port } = window.location;
+    const { origin } = window.location;
     bases.push(origin);
-    if (port === "19080") {
-      bases.push(`${protocol}//${hostname}:19081`);
-    }
-    if (port === "3000") {
-      bases.push(`${protocol}//${hostname}:8000`);
-    }
-    bases.push(`${protocol}//${hostname}:19081`);
-    bases.push(`${protocol}//${hostname}:8000`);
   }
-  bases.push("http://localhost:8000");
   return Array.from(new Set(bases));
 };
 
