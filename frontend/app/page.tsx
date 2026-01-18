@@ -67,6 +67,13 @@ const budgets = [
   "> 200k €",
 ];
 
+const generateId = () => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+};
+
 export default function Home() {
   const apiBase = useMemo(() => resolveApiBase(), []);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -203,14 +210,14 @@ export default function Home() {
 
     if (showUserMessage) {
       appendMessage({
-        id: crypto.randomUUID(),
+        id: generateId(),
         role: "user",
         content: userMessage,
         createdAt: new Date().toISOString(),
       });
     }
 
-    const assistantId = crypto.randomUUID();
+    const assistantId = generateId();
     appendMessage({
       id: assistantId,
       role: "assistant",
