@@ -4,18 +4,30 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import styles from "./page.module.css";
 
-const resolveApiBase = () => {
+const resolveApiBases = () => {
+  const bases: string[] = [];
   if (process.env.NEXT_PUBLIC_BACKEND_URL) {
-    return process.env.NEXT_PUBLIC_BACKEND_URL;
+    bases.push(process.env.NEXT_PUBLIC_BACKEND_URL);
   }
   if (process.env.NEXT_PUBLIC_API_BASE_URL) {
-    return process.env.NEXT_PUBLIC_API_BASE_URL;
+    bases.push(process.env.NEXT_PUBLIC_API_BASE_URL);
   }
   if (typeof window !== "undefined") {
-    const { protocol, hostname } = window.location;
-    return `${protocol}//${hostname}:19081`;
+    const { protocol, hostname, port } = window.location;
+    if (port) {
+      bases.push(`${protocol}//${hostname}:${port}`);
+      if (port === "19080") {
+        bases.push(`${protocol}//${hostname}:19081`);
+      }
+      if (port === "3000") {
+        bases.push(`${protocol}//${hostname}:8000`);
+      }
+    }
+    bases.push(`${protocol}//${hostname}:19081`);
+    bases.push(`${protocol}//${hostname}:8000`);
   }
-  return "http://localhost:8000";
+  bases.push("http://localhost:8000");
+  return Array.from(new Set(bases));
 };
 
 type ChatButton = {
@@ -75,7 +87,9 @@ const generateId = () => {
 };
 
 export default function Home() {
-  const apiBase = useMemo(() => resolveApiBase(), []);
+  const [apiBase, setApiBase] = useState<string | null>(null);
+  const apiCandidates = useMemo(() => resolveApiBases(), []);
+  const apiBaseRef = useRef<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatState, setChatState] = useState<ChatState>(initialState);
@@ -100,17 +114,35 @@ export default function Home() {
     initRef.current = true;
     const bootstrap = async () => {
       try {
-        const response = await fetch(`${apiBase}/api/chat/session`, {
-          method: "POST",
-        });
-        if (!response.ok) {
+        let resolvedBase: string | null = null;
+        let payload: { session_id: string } | null = null;
+        for (const candidate of apiCandidates) {
+          try {
+            const response = await fetch(`${candidate}/api/chat/session`, {
+              method: "POST",
+            });
+            if (!response.ok) {
+              continue;
+            }
+            payload = (await response.json()) as { session_id: string };
+            resolvedBase = candidate;
+            break;
+          } catch (candidateError) {
+            continue;
+          }
+        }
+
+        if (!resolvedBase || !payload) {
           throw new Error("Impossible d'initialiser la session.");
         }
-        const payload = (await response.json()) as { session_id: string };
+
+        setApiBase(resolvedBase);
+        apiBaseRef.current = resolvedBase;
         setSessionId(payload.session_id);
         await sendMessage("Bonjour", {
           displayUserMessage: false,
           nextStateOverride: { step: "WELCOME" },
+          apiBaseOverride: resolvedBase,
         });
       } catch (err) {
         setError("Session backend indisponible. Réessayez plus tard.");
@@ -150,12 +182,19 @@ export default function Home() {
     messageId: string,
     userMessage: string,
     nextStateOverride?: Partial<ChatState>,
+    apiBaseOverride?: string,
   ) => {
     if (!sessionId) {
       return;
     }
 
-    const response = await fetch(`${apiBase}/api/chat/message`, {
+    const resolvedApiBase =
+      apiBaseOverride ?? apiBaseRef.current ?? apiBase;
+    if (!resolvedApiBase) {
+      return;
+    }
+
+    const response = await fetch(`${resolvedApiBase}/api/chat/message`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -199,6 +238,7 @@ export default function Home() {
     options?: {
       displayUserMessage?: boolean;
       nextStateOverride?: Partial<ChatState>;
+      apiBaseOverride?: string;
     },
   ) => {
     if (!sessionId || isStreaming) {
@@ -207,6 +247,11 @@ export default function Home() {
 
     const showUserMessage = options?.displayUserMessage !== false;
     setError(null);
+    const resolvedApiBase =
+      options?.apiBaseOverride ?? apiBaseRef.current ?? apiBase;
+    if (!resolvedApiBase) {
+      return;
+    }
 
     if (showUserMessage) {
       appendMessage({
@@ -229,7 +274,7 @@ export default function Home() {
     setIsStreaming(true);
 
     try {
-      const response = await fetch(`${apiBase}/api/chat/stream`, {
+      const response = await fetch(`${resolvedApiBase}/api/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -346,6 +391,7 @@ export default function Home() {
           assistantId,
           userMessage,
           options?.nextStateOverride,
+          resolvedApiBase,
         );
       } catch (fallbackError) {
         setError("Impossible de contacter le backend.");
