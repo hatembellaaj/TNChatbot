@@ -31,7 +31,7 @@ flowchart LR
         BE[backend<br/>FastAPI]
         PG[postgres<br/>metadata RAG]
         QD[qdrant<br/>vecteurs RAG]
-        LLM[llm<br/>placeholder nginx]
+    LLM[ollama<br/>LLM server]
     end
 
     subgraph Sources["Sources d'ingestion"]
@@ -64,12 +64,37 @@ Les variables suivantes sont attendues (voir `.env.example`) :
 - `DATABASE_URL`
 - `QDRANT_URL`
 - `LLM_URL`
+- `OLLAMA_PORT` (optionnel, change le port hôte d'Ollama)
 - `BACKEND_PORT` (optionnel, change le port hôte du backend)
 - `FRONTEND_PORT` (optionnel, change le port hôte du frontend)
 - `NEXT_PUBLIC_BACKEND_URL` (optionnel, URL publique du backend pour le navigateur, sinon le frontend utilise l'hôte courant + `BACKEND_PORT`)
 - `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` / `SMTP_TO`
 - `EXPORT_MODE` (`NONE|SHEET|CRM_WEBHOOK`)
 
-## Notes
+## Utiliser Ollama pour les tests LLM
 
-- Le service `llm-server` est un placeholder (nginx) pour permettre à `docker compose up` de démarrer sans erreur.
+1. Lancez la stack depuis `infra/` :
+
+```bash
+cd infra
+docker compose up --build
+```
+
+2. Téléchargez un modèle dans le conteneur Ollama (exemple avec Llama 3.2 3B) :
+
+```bash
+docker compose exec ollama ollama pull llama3.2:3b
+```
+
+3. Redémarrez le backend si besoin, puis testez :
+
+```bash
+curl -N -X POST http://localhost:19081/api/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"<uuid>","user_message":"Bonjour","state":{"step":"WELCOME"},"context":{}}'
+```
+
+### Notes
+
+- Par défaut, le backend pointe vers `http://ollama:11434/v1/chat/completions`.
+- Vous pouvez changer de modèle via `LLM_MODEL` (ex : `llama3.2:3b`).
