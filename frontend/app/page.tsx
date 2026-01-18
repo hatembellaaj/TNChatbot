@@ -387,8 +387,8 @@ export default function Home() {
             if (event === "error") {
               const message =
                 typeof data?.message === "string" && data.message.trim().length > 0
-                  ? `Réponse de secours utilisée (modèle indisponible : ${data.message}).`
-                  : "Réponse de secours utilisée (modèle indisponible).";
+                  ? `Le streaming a échoué : ${data.message}. Réponse de secours utilisée.`
+                  : "Le streaming a échoué (modèle indisponible). Réponse de secours utilisée.";
               setError(message);
             }
           }
