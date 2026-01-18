@@ -321,23 +321,28 @@ export default function Home() {
         }
 
         if (finalPayload) {
+          const payload = finalPayload;
+          finalPayload = null;
+
           updateMessage(assistantId, (message) => ({
             ...message,
-            content: finalPayload.assistant_message,
+            content: payload.assistant_message ?? message.content,
             streaming: false,
-            buttons: finalPayload.buttons,
+            buttons: payload.buttons,
           }));
 
           updateChatState({
-            step: finalPayload.state.step,
-            slots: finalPayload.state.slot_updates ?? {},
-            suggestedNextStep: finalPayload.state.suggested_next_step,
+            step: payload.state.step,
+            slots: payload.state.slot_updates ?? {},
+            suggestedNextStep: payload.state.suggested_next_step,
           });
-
-          finalPayload = null;
         }
 
-        if (streamClosed) {
+        if (streamClosed && !finalPayload && tokenQueue.length === 0) {
+          updateMessage(assistantId, (message) => ({
+            ...message,
+            streaming: false,
+          }));
           setIsStreaming(false);
           clearInterval(timer);
         }
