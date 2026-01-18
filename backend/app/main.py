@@ -239,11 +239,11 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
         llm_start = time.monotonic()
         llm_task = asyncio.create_task(asyncio.to_thread(call_llm, messages))
 
-        while not llm_task.done():
-            try:
-                await asyncio.wait_for(asyncio.shield(llm_task), timeout=PING_INTERVAL_SECONDS)
-            except asyncio.TimeoutError:
-                yield _format_sse("ping", {"ts": time.time()})
+        while True:
+            done, _ = await asyncio.wait({llm_task}, timeout=PING_INTERVAL_SECONDS)
+            if llm_task in done:
+                break
+            yield _format_sse("ping", {"ts": time.time()})
 
         try:
             llm_response = await llm_task
