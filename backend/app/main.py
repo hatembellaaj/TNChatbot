@@ -78,6 +78,15 @@ def initialize_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_config (
+                key TEXT PRIMARY KEY,
+                value JSONB NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
 
 
 @app.on_event("startup")
@@ -232,16 +241,28 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
 
         while not llm_task.done():
             try:
-                await asyncio.wait_for(asyncio.shield(llm_task), timeout=PING_INTERVAL_SECONDS)
+                await asyncio.wait_for(
+                    asyncio.shield(llm_task), timeout=PING_INTERVAL_SECONDS
+                )
             except asyncio.TimeoutError:
                 yield _format_sse("ping", {"ts": time.time()})
+            except LLMClientError as exc:
+                llm_error = str(exc)
+                break
+            except Exception as exc:  # noqa: BLE001 - ensure stream stays alive
+                LOGGER.exception("LLM task failed")
+                llm_error = str(exc)
+                break
 
-        try:
-            llm_response = await llm_task
-            validated = validate_or_fallback(llm_response, allowed_buttons)
-        except LLMClientError as exc:
-            llm_error = str(exc)
+        if llm_error:
             validated = build_fallback_response()
+        else:
+            try:
+                llm_response = await llm_task
+                validated = validate_or_fallback(llm_response, allowed_buttons)
+            except LLMClientError as exc:
+                llm_error = str(exc)
+                validated = build_fallback_response()
 
         if llm_error:
             yield _format_sse("error", {"message": llm_error})
