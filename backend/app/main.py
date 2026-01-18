@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -75,6 +76,15 @@ def initialize_db() -> None:
                 session_id UUID PRIMARY KEY,
                 step TEXT NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_config (
+                key TEXT PRIMARY KEY,
+                value JSONB NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
             """
         )
@@ -217,63 +227,89 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
     )
 
     async def event_stream() -> Any:
-        route = "rag" if rag_triggered else "direct"
-        yield _format_sse(
-            "meta",
-            {
-                "route": route,
-                "rag_empty_factual": rag_empty_factual,
-            },
-        )
-
-        llm_error = None
-        llm_start = time.monotonic()
-        llm_task = asyncio.create_task(asyncio.to_thread(call_llm, messages))
-
-        while not llm_task.done():
-            try:
-                await asyncio.wait_for(asyncio.shield(llm_task), timeout=PING_INTERVAL_SECONDS)
-            except asyncio.TimeoutError:
-                yield _format_sse("ping", {"ts": time.time()})
+        llm_task: asyncio.Task[str] | None = None
+        llm_error: str | None = None
 
         try:
-            llm_response = await llm_task
-            validated = validate_or_fallback(llm_response, allowed_buttons)
-        except LLMClientError as exc:
-            llm_error = str(exc)
-            validated = build_fallback_response()
-
-        if llm_error:
-            yield _format_sse("error", {"message": llm_error})
-
-        next_step = validated.get("suggested_next_step", "MAIN_MENU")
-        with get_connection() as conn:
-            result = conn.execute(
-                "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
-                (next_step, payload.session_id),
+            route = "rag" if rag_triggered else "direct"
+            yield _format_sse(
+                "meta",
+                {
+                    "route": route,
+                    "rag_empty_factual": rag_empty_factual,
+                },
             )
-            if result.rowcount == 0:
-                raise HTTPException(status_code=404, detail="Session not found")
 
-        assistant_message = validated["assistant_message"]
-        for token in _tokenize_message(assistant_message):
-            yield _format_sse("token", {"value": token})
+            llm_start = time.monotonic()
+            llm_task = asyncio.create_task(asyncio.to_thread(call_llm, messages))
 
-        state_payload = {
-            "step": next_step,
-            "slot_updates": validated["slot_updates"],
-            "handoff": validated["handoff"],
-            "safety": validated["safety"],
-            "suggested_next_step": validated["suggested_next_step"],
-            "latency_ms": int((time.monotonic() - llm_start) * 1000),
-        }
-        yield _format_sse(
-            "final",
-            ChatStreamFinal(
-                assistant_message=assistant_message,
-                state=state_payload,
-                buttons=[ChatButton(**button) for button in validated["buttons"]],
-            ).model_dump(),
-        )
+            while not llm_task.done():
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(llm_task), timeout=PING_INTERVAL_SECONDS
+                    )
+                except asyncio.TimeoutError:
+                    yield _format_sse("ping", {"ts": time.time()})
+                except LLMClientError as exc:
+                    llm_error = str(exc)
+                    break
+                except Exception as exc:  # noqa: BLE001 - ensure stream stays alive
+                    LOGGER.exception("LLM task failed")
+                    llm_error = str(exc)
+                    break
+
+            if llm_error:
+                validated = build_fallback_response()
+            else:
+                try:
+                    llm_response = await llm_task
+                    validated = validate_or_fallback(llm_response, allowed_buttons)
+                except LLMClientError as exc:
+                    llm_error = str(exc)
+                    validated = build_fallback_response()
+
+            if llm_error:
+                yield _format_sse("error", {"message": llm_error})
+
+            next_step = validated.get("suggested_next_step", "MAIN_MENU")
+            with get_connection() as conn:
+                result = conn.execute(
+                    "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
+                    (next_step, payload.session_id),
+                )
+                if result.rowcount == 0:
+                    raise HTTPException(status_code=404, detail="Session not found")
+
+            assistant_message = validated["assistant_message"]
+            for token in _tokenize_message(assistant_message):
+                yield _format_sse("token", {"value": token})
+
+            state_payload = {
+                "step": next_step,
+                "slot_updates": validated["slot_updates"],
+                "handoff": validated["handoff"],
+                "safety": validated["safety"],
+                "suggested_next_step": validated["suggested_next_step"],
+                "latency_ms": int((time.monotonic() - llm_start) * 1000),
+            }
+            yield _format_sse(
+                "final",
+                ChatStreamFinal(
+                    assistant_message=assistant_message,
+                    state=state_payload,
+                    buttons=[ChatButton(**button) for button in validated["buttons"]],
+                ).model_dump(),
+            )
+        except Exception:  # noqa: BLE001 - last-resort protection for stream errors
+            LOGGER.exception("SSE stream failed")
+            yield _format_sse(
+                "error", {"message": "Streaming interrompu. Réessayez plus tard."}
+            )
+        finally:
+            if llm_task and not llm_task.done():
+                llm_task.cancel()
+            if llm_task:
+                with contextlib.suppress(Exception):
+                    await llm_task
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
