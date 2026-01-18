@@ -29,25 +29,37 @@ type RouteParams = {
 const forwardRequest = async (request: Request, path: string) => {
   const backendBase = resolveBackendBase(request);
   const targetUrl = new URL(`/api/chat/${path}`, backendBase);
-  const body = request.method === "GET" ? undefined : await request.text();
+  const requestUrl = new URL(request.url);
+  targetUrl.search = requestUrl.search;
+  const body =
+    request.method === "GET" || request.method === "HEAD"
+      ? undefined
+      : request.body ?? (await request.text());
+
+  const headers = new Headers(request.headers);
+  headers.delete("host");
+  headers.delete("content-length");
+  headers.set(
+    "x-forwarded-host",
+    request.headers.get("host") ?? "unknown",
+  );
 
   const response = await fetch(targetUrl, {
     method: request.method,
-    headers: {
-      "Content-Type": request.headers.get("content-type") ?? "application/json",
-    },
+    headers,
     body,
+    duplex: "half",
   });
 
-  const headers = new Headers();
+  const responseHeaders = new Headers();
   const contentType = response.headers.get("content-type");
   if (contentType) {
-    headers.set("content-type", contentType);
+    responseHeaders.set("content-type", contentType);
   }
 
   return new Response(response.body, {
     status: response.status,
-    headers,
+    headers: responseHeaders,
   });
 };
 
