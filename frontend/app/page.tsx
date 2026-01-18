@@ -89,6 +89,7 @@ const generateId = () => {
 export default function Home() {
   const [apiBase, setApiBase] = useState<string | null>(null);
   const apiCandidates = useMemo(() => resolveApiBases(), []);
+  const apiBaseRef = useRef<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatState, setChatState] = useState<ChatState>(initialState);
@@ -136,10 +137,12 @@ export default function Home() {
         }
 
         setApiBase(resolvedBase);
+        apiBaseRef.current = resolvedBase;
         setSessionId(payload.session_id);
         await sendMessage("Bonjour", {
           displayUserMessage: false,
           nextStateOverride: { step: "WELCOME" },
+          apiBaseOverride: resolvedBase,
         });
       } catch (err) {
         setError("Session backend indisponible. Réessayez plus tard.");
@@ -179,12 +182,19 @@ export default function Home() {
     messageId: string,
     userMessage: string,
     nextStateOverride?: Partial<ChatState>,
+    apiBaseOverride?: string,
   ) => {
     if (!sessionId) {
       return;
     }
 
-    const response = await fetch(`${apiBase}/api/chat/message`, {
+    const resolvedApiBase =
+      apiBaseOverride ?? apiBaseRef.current ?? apiBase;
+    if (!resolvedApiBase) {
+      return;
+    }
+
+    const response = await fetch(`${resolvedApiBase}/api/chat/message`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -228,6 +238,7 @@ export default function Home() {
     options?: {
       displayUserMessage?: boolean;
       nextStateOverride?: Partial<ChatState>;
+      apiBaseOverride?: string;
     },
   ) => {
     if (!sessionId || isStreaming || !apiBase) {
@@ -236,6 +247,11 @@ export default function Home() {
 
     const showUserMessage = options?.displayUserMessage !== false;
     setError(null);
+    const resolvedApiBase =
+      options?.apiBaseOverride ?? apiBaseRef.current ?? apiBase;
+    if (!resolvedApiBase) {
+      return;
+    }
 
     if (showUserMessage) {
       appendMessage({
@@ -258,7 +274,7 @@ export default function Home() {
     setIsStreaming(true);
 
     try {
-      const response = await fetch(`${apiBase}/api/chat/stream`, {
+      const response = await fetch(`${resolvedApiBase}/api/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -375,6 +391,7 @@ export default function Home() {
           assistantId,
           userMessage,
           options?.nextStateOverride,
+          resolvedApiBase,
         );
       } catch (fallbackError) {
         setError("Impossible de contacter le backend.");
