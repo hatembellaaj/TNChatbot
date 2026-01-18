@@ -385,7 +385,11 @@ export default function Home() {
             }
 
             if (event === "error") {
-              setError("Streaming interrompu : bascule en mode classique.");
+              const message =
+                typeof data?.message === "string" && data.message.trim().length > 0
+                  ? `Le streaming a échoué : ${data.message}. Réponse de secours utilisée.`
+                  : "Le streaming a échoué (modèle indisponible). Réponse de secours utilisée.";
+              setError(message);
             }
           }
 
