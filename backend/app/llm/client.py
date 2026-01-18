@@ -32,6 +32,12 @@ def call_llm(messages: List[Dict[str, str]]) -> str:
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
             body = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8") if exc.fp else ""
+        message = f"LLM request failed ({exc.code})"
+        if error_body:
+            message = f"{message}: {error_body}"
+        raise LLMClientError(message) from exc
     except urllib.error.URLError as exc:
         raise LLMClientError("LLM request failed") from exc
 

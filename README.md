@@ -64,6 +64,7 @@ Les variables suivantes sont attendues (voir `.env.example`) :
 - `DATABASE_URL`
 - `QDRANT_URL`
 - `LLM_URL`
+- `LLM_MODEL` (optionnel, modèle utilisé par le backend, ex : `llama3.2:3b`)
 - `OLLAMA_PORT` (optionnel, change le port hôte d'Ollama)
 - `BACKEND_PORT` (optionnel, change le port hôte du backend)
 - `FRONTEND_PORT` (optionnel, change le port hôte du frontend)
@@ -98,3 +99,5 @@ curl -N -X POST http://localhost:19081/api/chat/stream \
 
 - Par défaut, le backend pointe vers `http://ollama:11434/v1/chat/completions`.
 - Vous pouvez changer de modèle via `LLM_MODEL` (ex : `llama3.2:3b`).
+- Si vous voyez `LLM request failed`, vérifiez qu'un modèle est bien téléchargé
+  (`docker compose exec ollama ollama list`) et que l'API répond (`curl http://localhost:11434/api/tags`).
