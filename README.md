@@ -84,7 +84,7 @@ docker compose up --build
 2. Téléchargez un modèle dans le conteneur Ollama (exemple avec Llama 3.2 3B) :
 
 ```bash
-docker compose exec ollama ollama pull llama3.2:3b
+docker compose up -d ollama-init
 ```
 
 3. Redémarrez le backend si besoin, puis testez :
@@ -98,6 +98,7 @@ curl -N -X POST http://localhost:19081/api/chat/stream \
 ### Notes
 
 - Par défaut, le backend pointe vers `http://ollama:11434/v1/chat/completions`.
-- Vous pouvez changer de modèle via `LLM_MODEL` (ex : `llama3.2:3b`).
-- Si vous voyez `LLM request failed`, vérifiez qu'un modèle est bien téléchargé
-  (`docker compose exec ollama ollama list`) et que l'API répond (`curl http://localhost:11434/api/tags`).
+- Vous pouvez changer de modèle via `LLM_MODEL` (ex : `llama3.2:3b`), le service `ollama-init`
+  téléchargera automatiquement ce modèle.
+- Si vous voyez `LLM request failed`, vérifiez que l'API répond (`curl http://localhost:11434/api/tags`)
+  et que le modèle est bien présent (`docker compose exec ollama ollama list`).
