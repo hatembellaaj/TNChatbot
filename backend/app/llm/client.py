@@ -4,8 +4,8 @@ import urllib.error
 import urllib.request
 from typing import Dict, List
 
-DEFAULT_LLM_URL = "http://localhost:8001/v1/chat/completions"
-DEFAULT_MODEL = "llama-3.2-3b-instruct"
+DEFAULT_LLM_URL = "http://localhost:11434/v1/chat/completions"
+DEFAULT_MODEL = "llama3.2:3b"
 
 
 class LLMClientError(RuntimeError):
