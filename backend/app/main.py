@@ -248,7 +248,7 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
         try:
             llm_response = await llm_task
             validated = validate_or_fallback(llm_response, allowed_buttons)
-        except LLMClientError as exc:
+        except (LLMClientError, TimeoutError) as exc:
             llm_error = str(exc)
             validated = build_fallback_response()
 

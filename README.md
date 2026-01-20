@@ -98,6 +98,8 @@ curl -N -X POST http://localhost:19081/api/chat/stream \
 ### Notes
 
 - Par défaut, le backend pointe vers `http://ollama:11434/v1/chat/completions`.
+- Dans Docker Compose, `ollama` est le nom du service (accessible depuis les autres conteneurs) ;
+  depuis votre machine hôte, utilisez `http://localhost:11434`.
 - Vous pouvez changer de modèle via `LLM_MODEL` (ex : `llama3.2:3b`), le service `ollama-init`
   téléchargera automatiquement ce modèle.
 - Si vous voyez `LLM request failed`, vérifiez que l'API répond (`curl http://localhost:11434/api/tags`)
