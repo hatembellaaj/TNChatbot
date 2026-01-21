@@ -1,5 +1,6 @@
 import os
 import re
+import json
 from typing import Any, Dict, List
 
 SYSTEM_PROMPT = """
@@ -71,11 +72,12 @@ def _trim_rag_context(
     base_prompt = DEVELOPER_PROMPT_TEMPLATE.format(
         step=step,
         allowed_buttons=", ".join(allowed_buttons),
-        form_schema=form_schema,
-        config=config,
+        form_schema=_compact_json(form_schema, 80),
+        config=_compact_json(config, 50),
         rag_context="",
         rag_empty_factual="oui" if rag_empty_factual else "non",
     )
+
     base_tokens = (
         _estimate_tokens(SYSTEM_PROMPT)
         + _estimate_tokens(base_prompt)
@@ -99,6 +101,19 @@ def _trim_developer_prompt(
     reserved_tokens = _estimate_tokens(SYSTEM_PROMPT) + _estimate_tokens(user_message)
     available = max(max_tokens - reserved_tokens, 0)
     return _trim_text_to_tokens(developer_prompt, available)
+
+def _compact_json(obj: Dict[str, Any], max_tokens: int) -> str:
+    """
+    Compacte un dict JSON en une seule ligne et limite sa taille en 'tokens' (approx mots).
+    """
+    try:
+        text = json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return ""
+    tokens = re.findall(r"\S+", text)
+    if len(tokens) <= max_tokens:
+        return text
+    return " ".join(tokens[:max_tokens])
 
 
 def build_messages(
