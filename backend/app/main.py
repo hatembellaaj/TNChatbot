@@ -157,9 +157,23 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
 
     try:
         llm_response = call_llm(messages)
+    
+        LOGGER.warning(
+            "llm_raw_response session_id=%s response=%s",
+            payload.session_id,
+            llm_response,
+        )
+    
         validated = validate_or_fallback(llm_response, allowed_buttons)
-    except LLMClientError:
+    
+    except LLMClientError as exc:
+        LOGGER.error(
+            "llm_call_failed session_id=%s error=%s",
+            payload.session_id,
+            exc,
+        )
         validated = build_fallback_response()
+
 
     next_step = validated.get("suggested_next_step", "MAIN_MENU")
     with get_connection() as conn:
