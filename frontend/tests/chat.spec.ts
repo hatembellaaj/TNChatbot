@@ -5,23 +5,11 @@ type ChatButton = {
   label: string;
 };
 
-type StreamPayload = {
+type ChatPayload = {
   assistant_message: string;
-  state: {
-    step: string;
-    slot_updates?: Record<string, string>;
-    suggested_next_step?: string;
-  };
   buttons: ChatButton[];
-};
-
-const createSseBody = (payload: StreamPayload) => {
-  const tokens = payload.assistant_message.split(/(\s+)/).filter(Boolean);
-  const tokenEvents = tokens
-    .map((token) => `event: token\ndata: ${JSON.stringify({ value: token })}\n\n`)
-    .join("");
-  const finalEvent = `event: final\ndata: ${JSON.stringify(payload)}\n\n`;
-  return `${tokenEvents}${finalEvent}`;
+  suggested_next_step: string;
+  slot_updates: Record<string, string>;
 };
 
 const buildPayload = (
@@ -29,14 +17,11 @@ const buildPayload = (
   step: string,
   buttons: ChatButton[] = [],
   slot_updates?: Record<string, string>,
-): StreamPayload => ({
+): ChatPayload => ({
   assistant_message,
-  state: {
-    step,
-    slot_updates,
-    suggested_next_step: step,
-  },
   buttons,
+  suggested_next_step: step,
+  slot_updates: slot_updates ?? {},
 });
 
 test.beforeEach(async ({ page }) => {
@@ -48,12 +33,12 @@ test.beforeEach(async ({ page }) => {
     });
   });
 
-  await page.route("**/api/chat/stream", async (route) => {
+  await page.route("**/api/chat/message", async (route) => {
     const body = route.request().postDataJSON() as {
       user_message: string;
     };
 
-    let payload: StreamPayload;
+    let payload: ChatPayload;
 
     switch (body.user_message) {
       case "Bonjour":
@@ -111,10 +96,8 @@ test.beforeEach(async ({ page }) => {
 
     await route.fulfill({
       status: 200,
-      headers: {
-        "content-type": "text/event-stream",
-      },
-      body: createSseBody(payload),
+      contentType: "application/json",
+      body: JSON.stringify(payload),
     });
   });
 });
@@ -156,7 +139,7 @@ test("hors-scope lecteur", async ({ page }) => {
   await expect(assistantMessage).toContainText("hors scope lecteur");
 });
 
-test("streaming tokens arrivent avant final", async ({ page }) => {
+test("typing effect after full response", async ({ page }) => {
   await page.goto("/");
   await page
     .getByPlaceholder("Posez votre question ou choisissez un menu...")
