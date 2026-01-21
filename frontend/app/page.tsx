@@ -4,6 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import styles from "./page.module.css";
 
+const DEFAULT_BACKEND_PORT = "19081";
+
+const formatHostname = (hostname: string) =>
+  hostname.includes(":") ? `[${hostname}]` : hostname;
+
 const resolveApiBases = () => {
   const bases: string[] = [];
   if (process.env.NEXT_PUBLIC_BACKEND_URL) {
@@ -13,8 +18,14 @@ const resolveApiBases = () => {
     bases.push(process.env.NEXT_PUBLIC_API_BASE_URL);
   }
   if (typeof window !== "undefined") {
-    const { origin } = window.location;
+    const { origin, protocol, hostname, port } = window.location;
     bases.push(origin);
+
+    const backendPort =
+      process.env.NEXT_PUBLIC_BACKEND_PORT ?? DEFAULT_BACKEND_PORT;
+    if (backendPort && backendPort !== port) {
+      bases.push(`${protocol}//${formatHostname(hostname)}:${backendPort}`);
+    }
   }
   return Array.from(new Set(bases));
 };
