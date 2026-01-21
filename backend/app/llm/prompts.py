@@ -48,6 +48,15 @@ def _estimate_tokens(text: str) -> int:
     return len(re.findall(r"\S+", text))
 
 
+def _trim_text_to_tokens(text: str, max_tokens: int) -> str:
+    tokens = re.findall(r"\S+", text)
+    if len(tokens) <= max_tokens:
+        return text
+    if max_tokens <= 0:
+        return ""
+    return " ".join(tokens[:max_tokens])
+
+
 def _trim_rag_context(
     *,
     step: str,
@@ -81,6 +90,17 @@ def _trim_rag_context(
     return " ".join(rag_tokens[:available])
 
 
+def _trim_developer_prompt(
+    developer_prompt: str,
+    *,
+    user_message: str,
+) -> str:
+    max_tokens = int(os.getenv("PROMPT_MAX_TOKENS", DEFAULT_PROMPT_MAX_TOKENS))
+    reserved_tokens = _estimate_tokens(SYSTEM_PROMPT) + _estimate_tokens(user_message)
+    available = max(max_tokens - reserved_tokens, 0)
+    return _trim_text_to_tokens(developer_prompt, available)
+
+
 def build_messages(
     *,
     step: str,
@@ -107,6 +127,10 @@ def build_messages(
         config=config,
         rag_context=rag_context,
         rag_empty_factual="oui" if rag_empty_factual else "non",
+    )
+    developer_prompt = _trim_developer_prompt(
+        developer_prompt,
+        user_message=user_message,
     )
 
     return [

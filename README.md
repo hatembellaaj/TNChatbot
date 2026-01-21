@@ -65,6 +65,7 @@ Les variables suivantes sont attendues (voir `.env.example`) :
 - `QDRANT_URL`
 - `LLM_URL`
 - `LLM_MODEL` (optionnel, modèle utilisé par le backend, ex : `llama3.2:3b-instruct-q4_0`)
+- `PROMPT_MAX_TOKENS` (optionnel, budget total de tokens pour system/developer/user; le backend tronque le prompt pour rester sous ce seuil)
 - `OLLAMA_PORT` (optionnel, change le port hôte d'Ollama)
 - `OLLAMA_DEBUG` (optionnel, active les logs détaillés d'Ollama)
 - `BACKEND_PORT` (optionnel, change le port hôte du backend)
