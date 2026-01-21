@@ -20,7 +20,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://tnchatbot:tnchatbot@postgres:5432/tnchatbot}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       LLM_URL: ${LLM_URL:-http://ollama:11434/v1/chat/completions}
-      LLM_MODEL: ${LLM_MODEL:-llama3.2:3b}
+      LLM_MODEL: ${LLM_MODEL:-llama3.2:3b-instruct-q4_0}
       SMTP_HOST: ${SMTP_HOST:-smtp.example.com}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-user}
@@ -64,7 +64,7 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       [
-        "export OLLAMA_HOST=http://ollama:11434; until ollama list >/dev/null 2>&1; do sleep 1; done; ollama pull ${LLM_MODEL:-llama3.2:3b}",
+        "export OLLAMA_HOST=http://ollama:11434; until ollama list >/dev/null 2>&1; do sleep 1; done; ollama pull ${LLM_MODEL:-llama3.2:3b-instruct-q4_0}",
       ]
     volumes:
       - ollama_data:/root/.ollama
