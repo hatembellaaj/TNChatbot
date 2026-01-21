@@ -66,6 +66,7 @@ Les variables suivantes sont attendues (voir `.env.example`) :
 - `LLM_URL`
 - `LLM_MODEL` (optionnel, modèle utilisé par le backend, ex : `llama3.2:3b`)
 - `OLLAMA_PORT` (optionnel, change le port hôte d'Ollama)
+- `OLLAMA_DEBUG` (optionnel, active les logs détaillés d'Ollama)
 - `BACKEND_PORT` (optionnel, change le port hôte du backend)
 - `FRONTEND_PORT` (optionnel, change le port hôte du frontend)
 - `NEXT_PUBLIC_BACKEND_URL` (optionnel, URL publique du backend pour le navigateur, sinon le frontend utilise l'hôte courant + `BACKEND_PORT`)
