@@ -129,7 +129,7 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
     rag_context = payload.context.get("rag_context", "")
     step = payload.state.get("step", "UNKNOWN")
     intent = payload.state.get("intent") or payload.context.get("intent")
-    LOGGER.info("intent_selected intent=%s", intent or "unknown")
+    LOGGER.warning("intent_selected intent=%s", intent or "unknown")
 
     rag_triggered = should_trigger_rag(intent, payload.user_message)
     if rag_triggered:
@@ -217,7 +217,7 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
     rag_context = payload.context.get("rag_context", "")
     step = payload.state.get("step", "UNKNOWN")
     intent = payload.state.get("intent") or payload.context.get("intent")
-    LOGGER.info("intent_selected intent=%s", intent or "unknown")
+    LOGGER.warning("intent_selected intent=%s", intent or "unknown")
 
     rag_triggered = should_trigger_rag(intent, payload.user_message)
     if rag_triggered:
