@@ -64,6 +64,15 @@ BEGIN
         ) THEN
             ALTER TABLE chat_sessions ADD PRIMARY KEY (id);
         END IF;
+        IF NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conrelid = 'chat_sessions'::regclass
+              AND contype IN ('p', 'u')
+              AND pg_get_constraintdef(oid) LIKE '%(id)%'
+        ) THEN
+            ALTER TABLE chat_sessions ADD CONSTRAINT chat_sessions_id_unique UNIQUE (id);
+        END IF;
     END IF;
 
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'leads') THEN
@@ -83,6 +92,15 @@ BEGIN
               AND contype = 'p'
         ) THEN
             ALTER TABLE leads ADD PRIMARY KEY (id);
+        END IF;
+        IF NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conrelid = 'leads'::regclass
+              AND contype IN ('p', 'u')
+              AND pg_get_constraintdef(oid) LIKE '%(id)%'
+        ) THEN
+            ALTER TABLE leads ADD CONSTRAINT leads_id_unique UNIQUE (id);
         END IF;
     END IF;
 END $$;
