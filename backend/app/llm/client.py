@@ -7,7 +7,8 @@ import urllib.request
 from typing import Dict, List
 
 DEFAULT_LLM_URL = "http://localhost:11434/v1/chat/completions"
-DEFAULT_MODEL = "llama3.2:3b"
+DEFAULT_MODEL = "llama3.2:3b-instruct-q4_0"
+DEFAULT_TIMEOUT_SECONDS = 60
 LOGGER = logging.getLogger(__name__)
 
 
@@ -18,6 +19,7 @@ class LLMClientError(RuntimeError):
 def call_llm(messages: List[Dict[str, str]]) -> str:
     llm_url = os.getenv("LLM_URL", DEFAULT_LLM_URL)
     model = os.getenv("LLM_MODEL", DEFAULT_MODEL)
+    timeout_seconds = float(os.getenv("LLM_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS))
     start = time.monotonic()
 
     payload = {
@@ -35,12 +37,13 @@ def call_llm(messages: List[Dict[str, str]]) -> str:
 
     try:
         LOGGER.info(
-            "llm_request_start url=%s model=%s messages=%s",
+            "llm_request_start url=%s model=%s messages=%s timeout_s=%s",
             llm_url,
             model,
             len(messages),
+            timeout_seconds,
         )
-        with urllib.request.urlopen(request, timeout=20) as response:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             body = response.read().decode("utf-8")
         LOGGER.info(
             "llm_request_success url=%s model=%s latency_ms=%s bytes=%s",
