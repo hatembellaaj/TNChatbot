@@ -65,6 +65,8 @@ Les variables suivantes sont attendues (voir `.env.example`) :
 - `QDRANT_URL`
 - `LLM_URL`
 - `LLM_MODEL` (optionnel, modèle utilisé par le backend, ex : `llama3.2:3b-instruct-q4_0`)
+- `EMBEDDING_URL` (optionnel, URL du service d'embeddings utilisé pour l'ingestion et le RAG)
+- `EMBEDDING_MODEL` (optionnel, modèle d'embeddings, ex : `nomic-embed-text`)
 - `PROMPT_MAX_TOKENS` (optionnel, budget total de tokens pour system/developer/user; le backend tronque le prompt pour rester sous ce seuil)
 - `OLLAMA_PORT` (optionnel, change le port hôte d'Ollama)
 - `OLLAMA_DEBUG` (optionnel, active les logs détaillés d'Ollama)
@@ -119,5 +121,7 @@ curl -N -X POST http://localhost:19081/api/chat/stream \
   `NEXT_PUBLIC_BACKEND_URL` avec l'URL publique du backend.
 - Vous pouvez changer de modèle via `LLM_MODEL` (ex : `llama3.2:3b-instruct-q4_0`), le service `ollama-init`
   téléchargera automatiquement ce modèle.
+- Pour les embeddings via Ollama, définissez `EMBEDDING_MODEL` (ex : `nomic-embed-text`) ; `ollama-init`
+  téléchargera également ce modèle.
 - Si vous voyez `LLM request failed`, vérifiez que l'API répond (`curl http://localhost:11434/api/tags`)
   et que le modèle est bien présent (`docker compose exec ollama ollama list`).
