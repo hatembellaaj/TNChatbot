@@ -121,7 +121,7 @@ def create_chat_session() -> ChatSessionCreateResponse:
 
 @app.post("/api/chat/message", response_model=ChatMessageResponse)
 def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
-    allowed_buttons = payload.context.get("allowed_buttons", ["CALL_BACK"])
+    allowed_buttons = payload.context.get("allowed_buttons") or []
     form_schema = payload.context.get("form_schema", {})
     admin_config = load_admin_config()
     context_config = payload.context.get("config") or {}
@@ -163,24 +163,9 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
             payload.session_id,
             llm_response,
         )
-    
-        # ⬇️ NORMALISATION MINIMALE
-        parsed = json.loads(llm_response)
-    
-        if parsed.get("suggested_next_step") is None:
-            parsed["suggested_next_step"] = "MAIN_MENU"
-    
-        if parsed.get("handoff") is None:
-            parsed["handoff"] = {}
-    
-        if parsed.get("buttons") is None:
-            parsed["buttons"] = []
-    
-        llm_response = json.dumps(parsed, ensure_ascii=False)
-    
+
         validated = validate_or_fallback(llm_response, allowed_buttons)
 
-    
     except LLMClientError as exc:
         LOGGER.error(
             "llm_call_failed session_id=%s error=%s",
@@ -220,7 +205,7 @@ def _tokenize_message(message: str) -> List[str]:
 
 @app.post("/api/chat/stream")
 async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
-    allowed_buttons = payload.context.get("allowed_buttons", ["CALL_BACK"])
+    allowed_buttons = payload.context.get("allowed_buttons") or []
     form_schema = payload.context.get("form_schema", {})
     admin_config = load_admin_config()
     context_config = payload.context.get("config") or {}
