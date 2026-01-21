@@ -10,6 +10,8 @@ DEFAULT_QDRANT_URL = "http://localhost:6333"
 DEFAULT_QDRANT_COLLECTION = "tnchatbot_kb"
 DEFAULT_EMBEDDING_URL = "http://localhost:8001/v1/embeddings"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+DEFAULT_RAG_TOP_K = 6
+DEFAULT_RAG_SCORE_THRESHOLD = 0.2
 
 LOGGER = logging.getLogger(__name__)
 
@@ -96,7 +98,12 @@ class RetrievedChunk:
     payload: dict
 
 
-def search_qdrant(vector: List[float], top_k: int) -> List[RetrievedChunk]:
+def search_qdrant(
+    vector: List[float],
+    top_k: int,
+    score_threshold: float | None = None,
+    intent: str | None = None,
+) -> List[RetrievedChunk]:
     qdrant_url = os.getenv("QDRANT_URL", DEFAULT_QDRANT_URL).rstrip("/")
     collection = os.getenv("QDRANT_COLLECTION", DEFAULT_QDRANT_COLLECTION)
     url = f"{qdrant_url}/collections/{collection}/points/search"
@@ -105,15 +112,29 @@ def search_qdrant(vector: List[float], top_k: int) -> List[RetrievedChunk]:
         "limit": top_k,
         "with_payload": True,
     }
+    if score_threshold is not None:
+        payload["score_threshold"] = score_threshold
+    if intent:
+        payload["filter"] = {
+            "must": [
+                {
+                    "key": "intent",
+                    "match": {"value": intent},
+                }
+            ]
+        }
     response = request_json("POST", url, payload)
     result = response.get("result", [])
     chunks: List[RetrievedChunk] = []
     for item in result:
         payload = item.get("payload", {})
+        score = item.get("score", 0.0)
+        if score_threshold is not None and score < score_threshold:
+            continue
         chunks.append(
             RetrievedChunk(
                 content=payload.get("content", ""),
-                score=item.get("score", 0.0),
+                score=score,
                 payload=payload,
             )
         )
@@ -126,7 +147,16 @@ def build_rag_context(chunks: Iterable[RetrievedChunk]) -> str:
         content = chunk.content.strip()
         if not content:
             continue
-        lines.append(f"[{index}] {content}")
+        title = chunk.payload.get("title")
+        source_uri = chunk.payload.get("source_uri")
+        source_label = ""
+        if title and source_uri:
+            source_label = f" (source: {title} — {source_uri})"
+        elif title:
+            source_label = f" (source: {title})"
+        elif source_uri:
+            source_label = f" (source: {source_uri})"
+        lines.append(f"[{index}]{source_label} {content}")
     return "\n\n".join(lines)
 
 
@@ -161,7 +191,44 @@ def build_config(base_config: dict | None) -> dict:
     return config
 
 
-def retrieve_rag_context(query: str, top_k: int = 4) -> str:
+def normalize_intent(intent: str | None) -> str | None:
+    if not intent:
+        return None
+    normalized = intent.strip().lower()
+    return normalized or None
+
+
+def retrieve_rag_context(
+    query: str,
+    top_k: int | None = None,
+    intent: str | None = None,
+) -> str:
     vector = embed_query(query)
-    chunks = search_qdrant(vector, top_k)
-    return build_rag_context(chunks)
+    resolved_top_k = top_k or int(os.getenv("RAG_TOP_K", DEFAULT_RAG_TOP_K))
+    score_threshold_env = os.getenv("RAG_SCORE_THRESHOLD")
+    score_threshold = (
+        float(score_threshold_env)
+        if score_threshold_env is not None
+        else DEFAULT_RAG_SCORE_THRESHOLD
+    )
+    normalized_intent = normalize_intent(intent)
+    LOGGER.info(
+        "rag_search_start intent=%s top_k=%s score_threshold=%s",
+        normalized_intent or "none",
+        resolved_top_k,
+        score_threshold,
+    )
+    chunks = search_qdrant(vector, resolved_top_k, score_threshold, normalized_intent)
+    if not chunks and normalized_intent:
+        LOGGER.info("rag_intent_empty_fallback intent=%s", normalized_intent)
+        chunks = search_qdrant(vector, resolved_top_k, score_threshold)
+    best_chunk = chunks[:1]
+    if best_chunk:
+        LOGGER.info(
+            "rag_best_chunk_selected score=%.4f source=%s",
+            best_chunk[0].score,
+            best_chunk[0].payload.get("source_uri", "unknown"),
+        )
+    else:
+        LOGGER.info("rag_no_chunk_selected")
+    return build_rag_context(best_chunk)
