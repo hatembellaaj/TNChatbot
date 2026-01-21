@@ -37,6 +37,16 @@ KEYWORD_FALLBACKS = {
     "innovation",
 }
 
+INTENT_KEYWORDS = [
+    ("audience", {"audience", "lecteurs", "lectorat"}),
+    ("offres", {"offre", "offres", "produit", "produits"}),
+    ("formats", {"format", "formats", "video", "vidéo"}),
+    ("immoneuf", {"immoneuf", "immobilier neuf", "neuf"}),
+    ("premium", {"premium"}),
+    ("mag", {"mag", "magazine"}),
+    ("innovation", {"innovation", "innovant", "innovante"}),
+]
+
 FACTUAL_TOKENS = {
     "quel",
     "quelle",
@@ -196,6 +206,14 @@ def normalize_intent(intent: str | None) -> str | None:
         return None
     normalized = intent.strip().lower()
     return normalized or None
+
+
+def classify_intent(user_message: str) -> str | None:
+    lowered = user_message.lower()
+    for intent, keywords in INTENT_KEYWORDS:
+        if any(keyword in lowered for keyword in keywords):
+            return intent
+    return None
 
 
 def retrieve_rag_context(
