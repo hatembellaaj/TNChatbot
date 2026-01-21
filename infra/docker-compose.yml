@@ -35,6 +35,7 @@ services:
       - "${BACKEND_PORT:-19081}:8000"
     volumes:
       - ../migrations:/migrations:ro
+      - ../kb_sources:/app/kb_sources:ro
     depends_on:
       - postgres
       - qdrant
