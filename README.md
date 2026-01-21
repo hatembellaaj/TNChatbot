@@ -73,6 +73,17 @@ Les variables suivantes sont attendues (voir `.env.example`) :
 - `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` / `SMTP_TO`
 - `EXPORT_MODE` (`NONE|SHEET|CRM_WEBHOOK`)
 
+### Générer un `.env`
+
+Vous pouvez initialiser un `.env` pour la racine et `infra/` via :
+
+```bash
+./scripts/bootstrap-env.sh
+```
+
+Ce script copie `.env.example` et remplit des valeurs locales par défaut (`localhost` + ports).
+Pour un déploiement distant, mettez à jour `NEXT_PUBLIC_BACKEND_URL` avec l'URL publique du backend.
+
 ## Utiliser Ollama pour les tests LLM
 
 1. Lancez la stack depuis `infra/` :
