@@ -226,6 +226,13 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
     )
 
     async def event_stream() -> Any:
+        LOGGER.info(
+            "chat_stream_start session_id=%s step=%s rag_triggered=%s rag_empty_factual=%s",
+            payload.session_id,
+            step,
+            rag_triggered,
+            rag_empty_factual,
+        )
         route = "rag" if rag_triggered else "direct"
         yield _format_sse(
             "meta",
@@ -248,9 +255,14 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
         try:
             llm_response = await llm_task
             validated = validate_or_fallback(llm_response, allowed_buttons)
-        except LLMClientError as exc:
+        except (LLMClientError, TimeoutError) as exc:
             llm_error = str(exc)
             validated = build_fallback_response()
+            LOGGER.warning(
+                "chat_stream_llm_error session_id=%s error=%s",
+                payload.session_id,
+                llm_error,
+            )
 
         if llm_error:
             yield _format_sse("error", {"message": llm_error})
@@ -263,6 +275,11 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
             )
             if result.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Session not found")
+        LOGGER.info(
+            "chat_stream_state_update session_id=%s next_step=%s",
+            payload.session_id,
+            next_step,
+        )
 
         assistant_message = validated["assistant_message"]
         for token in _tokenize_message(assistant_message):

@@ -66,11 +66,24 @@ Les variables suivantes sont attendues (voir `.env.example`) :
 - `LLM_URL`
 - `LLM_MODEL` (optionnel, modèle utilisé par le backend, ex : `llama3.2:3b`)
 - `OLLAMA_PORT` (optionnel, change le port hôte d'Ollama)
+- `OLLAMA_DEBUG` (optionnel, active les logs détaillés d'Ollama)
 - `BACKEND_PORT` (optionnel, change le port hôte du backend)
 - `FRONTEND_PORT` (optionnel, change le port hôte du frontend)
 - `NEXT_PUBLIC_BACKEND_URL` (optionnel, URL publique du backend pour le navigateur, sinon le frontend utilise l'hôte courant + `BACKEND_PORT`)
+- `NEXT_PUBLIC_BACKEND_PORT` (optionnel, port exposé du backend côté navigateur, par défaut `19081`)
 - `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` / `SMTP_TO`
 - `EXPORT_MODE` (`NONE|SHEET|CRM_WEBHOOK`)
+
+### Générer un `.env`
+
+Vous pouvez initialiser un `.env` pour la racine et `infra/` via :
+
+```bash
+./scripts/bootstrap-env.sh
+```
+
+Ce script copie `.env.example` et remplit des valeurs locales par défaut (`localhost` + ports).
+Pour un déploiement distant, mettez à jour `NEXT_PUBLIC_BACKEND_URL` avec l'URL publique du backend.
 
 ## Utiliser Ollama pour les tests LLM
 
@@ -84,7 +97,7 @@ docker compose up --build
 2. Téléchargez un modèle dans le conteneur Ollama (exemple avec Llama 3.2 3B) :
 
 ```bash
-docker compose exec ollama ollama pull llama3.2:3b
+docker compose up -d ollama-init
 ```
 
 3. Redémarrez le backend si besoin, puis testez :
@@ -98,6 +111,12 @@ curl -N -X POST http://localhost:19081/api/chat/stream \
 ### Notes
 
 - Par défaut, le backend pointe vers `http://ollama:11434/v1/chat/completions`.
-- Vous pouvez changer de modèle via `LLM_MODEL` (ex : `llama3.2:3b`).
-- Si vous voyez `LLM request failed`, vérifiez qu'un modèle est bien téléchargé
-  (`docker compose exec ollama ollama list`) et que l'API répond (`curl http://localhost:11434/api/tags`).
+- Dans Docker Compose, `ollama` est le nom du service (accessible depuis les autres conteneurs) ;
+  depuis votre machine hôte, utilisez `http://localhost:11434`.
+- Le frontend essaie automatiquement l'origin courant puis l'hôte courant avec `BACKEND_PORT` (ou
+  `NEXT_PUBLIC_BACKEND_PORT` si défini). Si le frontend est servi depuis un autre domaine, définissez
+  `NEXT_PUBLIC_BACKEND_URL` avec l'URL publique du backend.
+- Vous pouvez changer de modèle via `LLM_MODEL` (ex : `llama3.2:3b`), le service `ollama-init`
+  téléchargera automatiquement ce modèle.
+- Si vous voyez `LLM request failed`, vérifiez que l'API répond (`curl http://localhost:11434/api/tags`)
+  et que le modèle est bien présent (`docker compose exec ollama ollama list`).

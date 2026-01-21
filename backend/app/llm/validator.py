@@ -46,6 +46,12 @@ def validate_buttons(payload: Dict[str, Any], allowed_buttons: List[str]) -> Non
             raise ValidationError(f"button id '{button_id}' not allowed")
 
 
+def validate_suggested_next_step(payload: Dict[str, Any]) -> None:
+    suggested_next_step = payload.get("suggested_next_step")
+    if not isinstance(suggested_next_step, str) or not suggested_next_step.strip():
+        raise ValidationError("suggested_next_step must be a non-empty string")
+
+
 def build_fallback_response() -> Dict[str, Any]:
     return {
         "assistant_message": (
@@ -69,6 +75,7 @@ def validate_or_fallback(
     try:
         payload = parse_llm_json(raw_content)
         validate_buttons(payload, allowed_buttons)
+        validate_suggested_next_step(payload)
         return payload
     except ValidationError:
         return build_fallback_response()
