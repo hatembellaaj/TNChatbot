@@ -164,7 +164,22 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
             llm_response,
         )
     
+        # ⬇️ NORMALISATION MINIMALE
+        parsed = json.loads(llm_response)
+    
+        if parsed.get("suggested_next_step") is None:
+            parsed["suggested_next_step"] = "MAIN_MENU"
+    
+        if parsed.get("handoff") is None:
+            parsed["handoff"] = {}
+    
+        if parsed.get("buttons") is None:
+            parsed["buttons"] = []
+    
+        llm_response = json.dumps(parsed, ensure_ascii=False)
+    
         validated = validate_or_fallback(llm_response, allowed_buttons)
+
     
     except LLMClientError as exc:
         LOGGER.error(
