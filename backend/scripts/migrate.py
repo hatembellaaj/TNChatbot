@@ -65,9 +65,8 @@ def main() -> None:
         for migration in migrations:
             if migration_applied(conn, migration.name):
                 continue
-            with conn.transaction():
-                apply_migration(conn, migration)
-                record_migration(conn, migration.name)
+            apply_migration(conn, migration)
+            record_migration(conn, migration.name)
 
 
 if __name__ == "__main__":
