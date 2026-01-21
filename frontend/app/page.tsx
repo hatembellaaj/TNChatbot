@@ -50,14 +50,11 @@ type ChatState = {
   suggestedNextStep?: string;
 };
 
-type StreamFinalPayload = {
+type ChatPayload = {
   assistant_message: string;
-  state: {
-    step: string;
-    slot_updates?: Record<string, string>;
-    suggested_next_step?: string;
-  };
   buttons: ChatButton[];
+  suggested_next_step: string;
+  slot_updates: Record<string, string>;
 };
 
 const initialState: ChatState = {
@@ -192,62 +189,44 @@ export default function Home() {
     }));
   };
 
-  const handleFallbackMessage = async (
+  const startTypingEffect = (
     messageId: string,
-    userMessage: string,
-    nextStateOverride?: Partial<ChatState>,
-    apiBaseOverride?: string,
+    payload: ChatPayload,
+    onDone: () => void,
   ) => {
-    if (!sessionId) {
+    const tokens = payload.assistant_message
+      .split(/(\s+)/)
+      .filter(Boolean);
+    if (tokens.length === 0) {
+      updateMessage(messageId, (message) => ({
+        ...message,
+        content: payload.assistant_message,
+        streaming: false,
+        buttons: payload.buttons,
+      }));
+      onDone();
       return;
     }
 
-    const resolvedApiBase =
-      apiBaseOverride ?? apiBaseRef.current ?? apiBase;
-    if (!resolvedApiBase) {
-      return;
-    }
+    let index = 0;
+    const timer = window.setInterval(() => {
+      const nextToken = tokens[index];
+      index += 1;
+      updateMessage(messageId, (message) => ({
+        ...message,
+        content: `${message.content}${nextToken ?? ""}`,
+      }));
 
-    const response = await fetch(`${resolvedApiBase}/api/chat/message`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        session_id: sessionId,
-        user_message: userMessage,
-        state: {
-          step: nextStateOverride?.step ?? chatState.step,
-          slots: { ...chatState.slots, ...(nextStateOverride?.slots ?? {}) },
-        },
-        context: {},
-      }),
-    });
-
-    if (!response.ok) {
-      console.warn(
-        `[TNChatbot] Fallback request failed (${response.status}) on ${resolvedApiBase}.`,
-      );
-      throw new Error("Impossible de récupérer une réponse.");
-    }
-
-    const payload = (await response.json()) as {
-      assistant_message: string;
-      buttons: ChatButton[];
-      suggested_next_step: string;
-      slot_updates: Record<string, string>;
-    };
-
-    updateMessage(messageId, (message) => ({
-      ...message,
-      content: payload.assistant_message,
-      streaming: false,
-      buttons: payload.buttons,
-    }));
-
-    updateChatState({
-      step: payload.suggested_next_step,
-      slots: payload.slot_updates,
-      suggestedNextStep: payload.suggested_next_step,
-    });
+      if (index >= tokens.length) {
+        window.clearInterval(timer);
+        updateMessage(messageId, (message) => ({
+          ...message,
+          streaming: false,
+          buttons: payload.buttons,
+        }));
+        onDone();
+      }
+    }, 35);
   };
 
   const sendMessage = async (
@@ -291,7 +270,7 @@ export default function Home() {
     setIsStreaming(true);
 
     try {
-      const response = await fetch(`${resolvedApiBase}/api/chat/stream`, {
+      const response = await fetch(`${resolvedApiBase}/api/chat/message`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -308,132 +287,32 @@ export default function Home() {
         }),
       });
 
-      if (!response.ok || !response.body) {
-        throw new Error("Streaming indisponible.");
+      if (!response.ok) {
+        throw new Error("Impossible de contacter le backend.");
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      const tokenQueue: string[] = [];
-      let finalPayload: StreamFinalPayload | null = null;
-      let streamClosed = false;
+      const payload = (await response.json()) as ChatPayload;
 
-      const flushTokens = () => {
-        if (tokenQueue.length > 0) {
-          const token = tokenQueue.shift();
-          if (token) {
-            updateMessage(assistantId, (message) => ({
-              ...message,
-              content: `${message.content}${token}`,
-            }));
-          }
-          return;
-        }
+      updateChatState({
+        step: payload.suggested_next_step,
+        slots: payload.slot_updates,
+        suggestedNextStep: payload.suggested_next_step,
+      });
 
-        if (finalPayload) {
-          const payload = finalPayload;
-          finalPayload = null;
-
-          updateMessage(assistantId, (message) => ({
-            ...message,
-            content: payload.assistant_message ?? message.content,
-            streaming: false,
-            buttons: payload.buttons,
-          }));
-
-          updateChatState({
-            step: payload.state.step,
-            slots: payload.state.slot_updates ?? {},
-            suggestedNextStep: payload.state.suggested_next_step,
-          });
-        }
-
-        if (streamClosed && !finalPayload && tokenQueue.length === 0) {
-          updateMessage(assistantId, (message) => ({
-            ...message,
-            streaming: false,
-          }));
-          setIsStreaming(false);
-          clearInterval(timer);
-        }
-      };
-
-      const timer = window.setInterval(flushTokens, 45);
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) {
-          streamClosed = true;
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-
-        let separatorIndex = buffer.indexOf("\n\n");
-        while (separatorIndex !== -1) {
-          const chunk = buffer.slice(0, separatorIndex);
-          buffer = buffer.slice(separatorIndex + 2);
-
-          const lines = chunk
-            .split("\n")
-            .map((line) => line.trim())
-            .filter(Boolean);
-          const eventLine = lines.find((line) => line.startsWith("event:"));
-          const dataLine = lines.find((line) => line.startsWith("data:"));
-
-          if (eventLine && dataLine) {
-            const event = eventLine.replace("event:", "").trim();
-            const data = JSON.parse(dataLine.replace("data:", "").trim());
-
-            if (event === "token") {
-              tokenQueue.push(data.value as string);
-            }
-
-            if (event === "final") {
-              finalPayload = data as StreamFinalPayload;
-              streamClosed = true;
-            }
-
-            if (event === "error") {
-              const message =
-                typeof data?.message === "string" && data.message.trim().length > 0
-                  ? `Le streaming a échoué : ${data.message}. Réponse de secours utilisée.`
-                  : "Le streaming a échoué (modèle indisponible). Réponse de secours utilisée.";
-              setError(message);
-            }
-          }
-
-          separatorIndex = buffer.indexOf("\n\n");
-        }
-      }
+      startTypingEffect(assistantId, payload, () => {
+        setIsStreaming(false);
+      });
     } catch (err) {
       updateMessage(assistantId, (message) => ({
         ...message,
-        content: "Connexion SSE indisponible. Bascule sur réponse classique...",
+        content: "Oups, le backend ne répond pas.",
+        streaming: false,
       }));
-      try {
-        await handleFallbackMessage(
-          assistantId,
-          userMessage,
-          options?.nextStateOverride,
-          resolvedApiBase,
-        );
-      } catch (fallbackError) {
-        const message =
-          fallbackError instanceof Error
-            ? fallbackError.message
-            : "Erreur inconnue côté backend.";
-        console.error("[TNChatbot] Fallback request failed.", fallbackError);
-        setError(`Impossible de contacter le backend. (${message})`);
-        updateMessage(assistantId, (message) => ({
-          ...message,
-          content: "Oups, le backend ne répond pas.",
-          streaming: false,
-        }));
-      } finally {
-        setIsStreaming(false);
-      }
+      const message =
+        err instanceof Error ? err.message : "Erreur inconnue côté backend.";
+      console.error("[TNChatbot] Request failed.", err);
+      setError(`Impossible de contacter le backend. (${message})`);
+      setIsStreaming(false);
     }
   };
 
@@ -469,11 +348,11 @@ export default function Home() {
             <div>
               <h1 style={{ margin: 0, fontSize: "1.4rem" }}>TNChatbot</h1>
               <p style={{ margin: 0, color: "#94a3b8" }}>
-                Expérience chat complète (SSE, menus, formulaires)
+                Expérience chat fluide (menus, formulaires)
               </p>
             </div>
             <span className={styles.badge}>
-              {isStreaming ? "Streaming" : "Prêt"}
+              {isStreaming ? "En cours" : "Prêt"}
             </span>
           </header>
 
