@@ -25,7 +25,7 @@ Aucun texte hors JSON. Aucun champ supplémentaire.
 """.strip()
 
 
-DEFAULT_PROMPT_MAX_TOKENS = 400
+DEFAULT_PROMPT_MAX_TOKENS = 250
 
 DEVELOPER_PROMPT_TEMPLATE = """
 Étape courante: {step}
@@ -138,11 +138,12 @@ def build_messages(
     developer_prompt = DEVELOPER_PROMPT_TEMPLATE.format(
         step=step,
         allowed_buttons=", ".join(allowed_buttons),
-        form_schema=form_schema,
-        config=config,
+        form_schema=_compact_json(form_schema, 80),
+        config=_compact_json(config, 50),
         rag_context=rag_context,
         rag_empty_factual="oui" if rag_empty_factual else "non",
     )
+
     developer_prompt = _trim_developer_prompt(
         developer_prompt,
         user_message=user_message,
