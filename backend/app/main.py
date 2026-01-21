@@ -133,7 +133,10 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
     rag_triggered = should_trigger_rag(intent, payload.user_message)
     if rag_triggered:
         try:
-            retrieved_context = retrieve_rag_context(payload.user_message)
+            retrieved_context = retrieve_rag_context(
+                payload.user_message,
+                intent=intent,
+            )
             rag_context = "\n\n".join(
                 [context for context in (rag_context, retrieved_context) if context]
             )
@@ -217,7 +220,10 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
     rag_triggered = should_trigger_rag(intent, payload.user_message)
     if rag_triggered:
         try:
-            retrieved_context = retrieve_rag_context(payload.user_message)
+            retrieved_context = retrieve_rag_context(
+                payload.user_message,
+                intent=intent,
+            )
             rag_context = "\n\n".join(
                 [context for context in (rag_context, retrieved_context) if context]
             )

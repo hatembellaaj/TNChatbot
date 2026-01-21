@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -119,6 +120,12 @@ def iter_source_files(source_dir: Path) -> Iterable[Path]:
         yield path
 
 
+def derive_intent_from_path(path: Path) -> str:
+    stem = path.stem.strip().lower()
+    stem = re.sub(r"[\s\-]+", "_", stem)
+    return stem
+
+
 def upsert_qdrant_points(points: List[dict]) -> None:
     if not points:
         return
@@ -171,6 +178,7 @@ def ingest_sources(source_dir: Path | str | None = None) -> dict:
             embeddings = embed_texts(chunks)
             ensure_qdrant_collection(len(embeddings[0]))
             points: List[dict] = []
+            intent = derive_intent_from_path(path)
 
             for index, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
                 chunk_id = uuid.uuid4()
@@ -197,6 +205,7 @@ def ingest_sources(source_dir: Path | str | None = None) -> dict:
                             "document_id": str(doc_id),
                             "chunk_index": index,
                             "content": chunk,
+                            "intent": intent,
                             "source_uri": str(path.relative_to(source_root)),
                             "title": path.stem,
                         },
