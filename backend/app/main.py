@@ -19,6 +19,7 @@ from app.llm.prompts import build_messages
 from app.llm.validator import build_fallback_response, validate_or_fallback
 from app.rag.retrieve import (
     build_config,
+    classify_intent,
     is_factual_question,
     retrieve_rag_context,
     should_trigger_rag,
@@ -128,12 +129,19 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
     config = build_config({**admin_config, **context_config})
     rag_context = payload.context.get("rag_context", "")
     step = payload.state.get("step", "UNKNOWN")
-    intent = payload.state.get("intent") or payload.context.get("intent")
+    raw_intent = payload.state.get("intent") or payload.context.get("intent")
+    inferred_intent = None if raw_intent else classify_intent(payload.user_message)
+    intent = raw_intent or inferred_intent
+    source = "payload" if raw_intent else ("inferred" if inferred_intent else "none")
+    LOGGER.warning("intent_selected intent=%s source=%s", intent or "unknown", source)
 
     rag_triggered = should_trigger_rag(intent, payload.user_message)
     if rag_triggered:
         try:
-            retrieved_context = retrieve_rag_context(payload.user_message)
+            retrieved_context = retrieve_rag_context(
+                payload.user_message,
+                intent=intent,
+            )
             rag_context = "\n\n".join(
                 [context for context in (rag_context, retrieved_context) if context]
             )
@@ -212,12 +220,19 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
     config = build_config({**admin_config, **context_config})
     rag_context = payload.context.get("rag_context", "")
     step = payload.state.get("step", "UNKNOWN")
-    intent = payload.state.get("intent") or payload.context.get("intent")
+    raw_intent = payload.state.get("intent") or payload.context.get("intent")
+    inferred_intent = None if raw_intent else classify_intent(payload.user_message)
+    intent = raw_intent or inferred_intent
+    source = "payload" if raw_intent else ("inferred" if inferred_intent else "none")
+    LOGGER.warning("intent_selected intent=%s source=%s", intent or "unknown", source)
 
     rag_triggered = should_trigger_rag(intent, payload.user_message)
     if rag_triggered:
         try:
-            retrieved_context = retrieve_rag_context(payload.user_message)
+            retrieved_context = retrieve_rag_context(
+                payload.user_message,
+                intent=intent,
+            )
             rag_context = "\n\n".join(
                 [context for context in (rag_context, retrieved_context) if context]
             )
