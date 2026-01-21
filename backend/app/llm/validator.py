@@ -1,14 +1,8 @@
 import json
 from typing import Any, Dict, List
 
-REQUIRED_FIELDS = {
-    "assistant_message",
-    "buttons",
-    "suggested_next_step",
-    "slot_updates",
-    "handoff",
-    "safety",
-}
+DEFAULT_HANDOFF = {"requested": False}
+DEFAULT_SAFETY = {"flagged": False}
 
 
 class ValidationError(ValueError):
@@ -24,32 +18,68 @@ def parse_llm_json(raw_content: str) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValidationError("LLM response must be a JSON object")
 
-    missing = REQUIRED_FIELDS - payload.keys()
-    if missing:
-        raise ValidationError(f"Missing fields: {', '.join(sorted(missing))}")
-
     return payload
 
 
-def validate_buttons(payload: Dict[str, Any], allowed_buttons: List[str]) -> None:
-    buttons = payload.get("buttons")
+def _normalize_buttons(
+    buttons: Any,
+    allowed_buttons: List[str],
+) -> List[Dict[str, str]]:
     if not isinstance(buttons, list):
-        raise ValidationError("buttons must be a list")
+        return []
 
+    normalized: List[Dict[str, str]] = []
     for button in buttons:
         if not isinstance(button, dict):
-            raise ValidationError("button entries must be objects")
+            continue
         button_id = button.get("id")
-        if not isinstance(button_id, str):
-            raise ValidationError("button id must be a string")
-        if button_id not in allowed_buttons:
-            raise ValidationError(f"button id '{button_id}' not allowed")
+        label = button.get("label")
+        if not isinstance(button_id, str) or not button_id.strip():
+            continue
+        if not isinstance(label, str) or not label.strip():
+            continue
+        if allowed_buttons and button_id not in allowed_buttons:
+            continue
+        normalized.append({"id": button_id, "label": label})
+    return normalized
 
 
-def validate_suggested_next_step(payload: Dict[str, Any]) -> None:
+def normalize_llm_payload(
+    raw_content: str,
+    allowed_buttons: List[str],
+) -> Dict[str, Any]:
+    payload = parse_llm_json(raw_content)
+
+    assistant_message = payload.get("assistant_message")
+    if not isinstance(assistant_message, str) or not assistant_message.strip():
+        raise ValidationError("assistant_message must be a non-empty string")
+
     suggested_next_step = payload.get("suggested_next_step")
     if not isinstance(suggested_next_step, str) or not suggested_next_step.strip():
-        raise ValidationError("suggested_next_step must be a non-empty string")
+        suggested_next_step = "MAIN_MENU"
+
+    slot_updates = payload.get("slot_updates")
+    if not isinstance(slot_updates, dict):
+        slot_updates = {}
+
+    handoff = payload.get("handoff")
+    if not isinstance(handoff, dict):
+        handoff = DEFAULT_HANDOFF.copy()
+
+    safety = payload.get("safety")
+    if not isinstance(safety, dict):
+        safety = DEFAULT_SAFETY.copy()
+
+    buttons = _normalize_buttons(payload.get("buttons"), allowed_buttons)
+
+    return {
+        "assistant_message": assistant_message,
+        "buttons": buttons,
+        "suggested_next_step": suggested_next_step,
+        "slot_updates": slot_updates,
+        "handoff": handoff,
+        "safety": safety,
+    }
 
 
 def build_fallback_response() -> Dict[str, Any]:
@@ -73,9 +103,6 @@ def validate_or_fallback(
     allowed_buttons: List[str],
 ) -> Dict[str, Any]:
     try:
-        payload = parse_llm_json(raw_content)
-        validate_buttons(payload, allowed_buttons)
-        validate_suggested_next_step(payload)
-        return payload
+        return normalize_llm_payload(raw_content, allowed_buttons)
     except ValidationError:
         return build_fallback_response()
