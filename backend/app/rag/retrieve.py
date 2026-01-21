@@ -212,7 +212,23 @@ def retrieve_rag_context(
         else DEFAULT_RAG_SCORE_THRESHOLD
     )
     normalized_intent = normalize_intent(intent)
+    LOGGER.info(
+        "rag_search_start intent=%s top_k=%s score_threshold=%s",
+        normalized_intent or "none",
+        resolved_top_k,
+        score_threshold,
+    )
     chunks = search_qdrant(vector, resolved_top_k, score_threshold, normalized_intent)
     if not chunks and normalized_intent:
+        LOGGER.info("rag_intent_empty_fallback intent=%s", normalized_intent)
         chunks = search_qdrant(vector, resolved_top_k, score_threshold)
-    return build_rag_context(chunks)
+    best_chunk = chunks[:1]
+    if best_chunk:
+        LOGGER.info(
+            "rag_best_chunk_selected score=%.4f source=%s",
+            best_chunk[0].score,
+            best_chunk[0].payload.get("source_uri", "unknown"),
+        )
+    else:
+        LOGGER.info("rag_no_chunk_selected")
+    return build_rag_context(best_chunk)
