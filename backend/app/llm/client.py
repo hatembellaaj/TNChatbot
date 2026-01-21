@@ -7,7 +7,7 @@ import urllib.request
 from typing import Dict, List
 
 DEFAULT_LLM_URL = "http://localhost:11434/v1/chat/completions"
-DEFAULT_MODEL = "llama3.2:3b"
+DEFAULT_MODEL = "llama3.2:3b-instruct-q4_0"
 DEFAULT_TIMEOUT_SECONDS = 60
 LOGGER = logging.getLogger(__name__)
 
