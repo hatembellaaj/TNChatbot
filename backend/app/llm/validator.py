@@ -9,14 +9,14 @@ class ValidationError(ValueError):
     """Raised when the LLM response is invalid."""
 
 
-def parse_llm_json(raw_content: str) -> Dict[str, Any]:
+def _parse_llm_payload(raw_content: str) -> Dict[str, Any]:
     try:
         payload = json.loads(raw_content)
-    except json.JSONDecodeError as exc:
-        raise ValidationError("LLM response is not valid JSON") from exc
+    except json.JSONDecodeError:
+        return {}
 
     if not isinstance(payload, dict):
-        raise ValidationError("LLM response must be a JSON object")
+        return {}
 
     return payload
 
@@ -47,16 +47,19 @@ def _normalize_buttons(
 def normalize_llm_payload(
     raw_content: str,
     allowed_buttons: List[str],
+    default_next_step: str,
 ) -> Dict[str, Any]:
-    payload = parse_llm_json(raw_content)
+    payload = _parse_llm_payload(raw_content)
 
     assistant_message = payload.get("assistant_message")
     if not isinstance(assistant_message, str) or not assistant_message.strip():
+        assistant_message = raw_content.strip()
+    if not assistant_message:
         raise ValidationError("assistant_message must be a non-empty string")
 
     suggested_next_step = payload.get("suggested_next_step")
     if not isinstance(suggested_next_step, str) or not suggested_next_step.strip():
-        suggested_next_step = "MAIN_MENU"
+        suggested_next_step = default_next_step
 
     slot_updates = payload.get("slot_updates")
     if not isinstance(slot_updates, dict):
@@ -83,15 +86,17 @@ def normalize_llm_payload(
 
 
 def build_fallback_response() -> Dict[str, Any]:
+    return build_fallback_response_with_step("MAIN_MENU")
+
+
+def build_fallback_response_with_step(default_next_step: str) -> Dict[str, Any]:
     return {
         "assistant_message": (
             "Je suis désolé, je n'ai pas pu traiter votre demande. "
             "Voici le menu principal pour continuer."
         ),
-        "buttons": [
-            {"id": "CALL_BACK", "label": "Être rappelé"},
-        ],
-        "suggested_next_step": "MAIN_MENU",
+        "buttons": [],
+        "suggested_next_step": default_next_step,
         "slot_updates": {},
         "handoff": {"requested": False},
         "safety": {"flagged": False},
@@ -101,8 +106,9 @@ def build_fallback_response() -> Dict[str, Any]:
 def validate_or_fallback(
     raw_content: str,
     allowed_buttons: List[str],
+    default_next_step: str,
 ) -> Dict[str, Any]:
     try:
-        return normalize_llm_payload(raw_content, allowed_buttons)
+        return normalize_llm_payload(raw_content, allowed_buttons, default_next_step)
     except ValidationError:
-        return build_fallback_response()
+        return build_fallback_response_with_step(default_next_step)

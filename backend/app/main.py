@@ -16,7 +16,10 @@ from app.db import get_connection
 from app.leads import router as leads_router
 from app.llm.client import LLMClientError, call_llm
 from app.llm.prompts import build_messages
-from app.llm.validator import build_fallback_response, validate_or_fallback
+from app.llm.validator import (
+    build_fallback_response_with_step,
+    validate_or_fallback,
+)
 from app.rag.retrieve import (
     build_config,
     classify_intent,
@@ -179,6 +182,8 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
         user_message=payload.user_message,
     )
 
+    default_next_step = payload.state.get("step", "MAIN_MENU")
+
     try:
         llm_response = call_llm(messages)
     
@@ -188,7 +193,11 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
             llm_response,
         )
 
-        validated = validate_or_fallback(llm_response, allowed_buttons)
+        validated = validate_or_fallback(
+            llm_response,
+            allowed_buttons,
+            default_next_step,
+        )
 
     except LLMClientError as exc:
         LOGGER.error(
@@ -196,10 +205,10 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
             payload.session_id,
             exc,
         )
-        validated = build_fallback_response()
+        validated = build_fallback_response_with_step(default_next_step)
 
 
-    next_step = validated.get("suggested_next_step", "MAIN_MENU")
+    next_step = validated.get("suggested_next_step", default_next_step)
     with get_connection() as conn:
         result = conn.execute(
             "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
@@ -276,6 +285,8 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
         len(rag_context),
     )
 
+    default_next_step = payload.state.get("step", "MAIN_MENU")
+
     messages = build_messages(
         step=step,
         allowed_buttons=allowed_buttons,
@@ -315,10 +326,14 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
 
         try:
             llm_response = await llm_task
-            validated = validate_or_fallback(llm_response, allowed_buttons)
+            validated = validate_or_fallback(
+                llm_response,
+                allowed_buttons,
+                default_next_step,
+            )
         except (LLMClientError, TimeoutError) as exc:
             llm_error = str(exc)
-            validated = build_fallback_response()
+            validated = build_fallback_response_with_step(default_next_step)
             LOGGER.warning(
                 "chat_stream_llm_error session_id=%s error=%s",
                 payload.session_id,
@@ -328,7 +343,7 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
         if llm_error:
             yield _format_sse("error", {"message": llm_error})
 
-        next_step = validated.get("suggested_next_step", "MAIN_MENU")
+        next_step = validated.get("suggested_next_step", default_next_step)
         with get_connection() as conn:
             result = conn.execute(
                 "UPDATE chat_sessions SET step = %s WHERE session_id = %s",

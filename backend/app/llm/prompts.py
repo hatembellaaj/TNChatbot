@@ -12,18 +12,7 @@ Contraintes obligatoires :
 - N'invente jamais d'information.
 - Si un contexte RAG est fourni, ta réponse doit reprendre explicitement ses informations (pas de réponse générique).
 - Si le contexte est insuffisant, dis-le poliment.
-- Réponds uniquement avec un JSON valide conforme EXACTEMENT au schéma :
-
-{
-  "assistant_message": string,
-  "buttons": [ { "id": string, "label": string } ],
-  "suggested_next_step": string,
-  "slot_updates": object,
-  "handoff": object,
-  "safety": object
-}
-
-Aucun texte hors JSON. Aucun champ supplémentaire.
+- Réponds avec un texte simple (pas de JSON, pas de balises).
 """.strip()
 
 LOGGER = logging.getLogger(__name__)

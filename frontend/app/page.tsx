@@ -57,6 +57,16 @@ type ChatPayload = {
   slot_updates: Record<string, string>;
 };
 
+const buildTextPayload = (
+  assistantMessage: string,
+  fallbackStep: string,
+): ChatPayload => ({
+  assistant_message: assistantMessage,
+  buttons: [],
+  suggested_next_step: fallbackStep,
+  slot_updates: {},
+});
+
 const initialState: ChatState = {
   step: "WELCOME",
   slots: {},
@@ -291,7 +301,35 @@ export default function Home() {
         throw new Error("Impossible de contacter le backend.");
       }
 
-      const payload = (await response.json()) as ChatPayload;
+      const rawBody = await response.text();
+      const fallbackStep = options?.nextStateOverride?.step ?? chatState.step;
+      let payload: ChatPayload;
+      try {
+        const parsed = JSON.parse(rawBody) as Partial<ChatPayload>;
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          typeof parsed.assistant_message === "string"
+        ) {
+          payload = {
+            assistant_message: parsed.assistant_message,
+            buttons: Array.isArray(parsed.buttons) ? parsed.buttons : [],
+            suggested_next_step:
+              typeof parsed.suggested_next_step === "string" &&
+              parsed.suggested_next_step
+                ? parsed.suggested_next_step
+                : fallbackStep,
+            slot_updates:
+              parsed.slot_updates && typeof parsed.slot_updates === "object"
+                ? parsed.slot_updates
+                : {},
+          };
+        } else {
+          payload = buildTextPayload(rawBody.trim(), fallbackStep);
+        }
+      } catch (parseError) {
+        payload = buildTextPayload(rawBody.trim(), fallbackStep);
+      }
 
       updateChatState({
         step: payload.suggested_next_step,
