@@ -253,6 +253,7 @@ def retrieve_rag_context(
             best_chunk[0].score,
             best_chunk[0].payload.get("source_uri", "unknown"),
         )
+        LOGGER.info("rag_context_sent_to_llm content=%s", best_chunk[0].content)
     else:
         LOGGER.info("rag_no_chunk_selected")
     return build_rag_context(best_chunk)
