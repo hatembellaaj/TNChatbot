@@ -14,6 +14,9 @@ DEFAULT_EMBEDDING_URL = "http://localhost:8001/v1/embeddings"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_RAG_TOP_K = 6
 DEFAULT_RAG_SCORE_THRESHOLD = 0.2
+DEFAULT_KB_SOURCES_DIR = "kb_sources"
+DEFAULT_RAG_CHUNK_SIZE = 200
+DEFAULT_RAG_CHUNK_OVERLAP = 40
 
 LOGGER = logging.getLogger(__name__)
 
@@ -109,6 +112,22 @@ class RetrievedChunk:
     content: str
     score: float
     payload: dict
+
+
+def chunk_text(text: str, max_tokens: int, overlap: int) -> List[str]:
+    words = [word for word in text.split() if word.strip()]
+    if not words:
+        return []
+    chunks: List[str] = []
+    start = 0
+    while start < len(words):
+        end = min(start + max_tokens, len(words))
+        chunk_words = words[start:end]
+        chunks.append(" ".join(chunk_words))
+        if end == len(words):
+            break
+        start = max(0, end - overlap)
+    return chunks
 
 
 def search_qdrant(
@@ -225,6 +244,41 @@ def source_matches_intent(payload: dict, intent: str) -> bool:
     return False
 
 
+def load_intent_chunks(intent: str) -> List[RetrievedChunk]:
+    sources_dir = Path(os.getenv("KB_SOURCES_DIR", DEFAULT_KB_SOURCES_DIR)).resolve()
+    if not sources_dir.exists():
+        LOGGER.warning("rag_intent_sources_missing path=%s", sources_dir)
+        return []
+    max_tokens = int(os.getenv("RAG_CHUNK_SIZE", str(DEFAULT_RAG_CHUNK_SIZE)))
+    overlap = int(os.getenv("RAG_CHUNK_OVERLAP", str(DEFAULT_RAG_CHUNK_OVERLAP)))
+    for path in sorted(sources_dir.iterdir()):
+        if path.is_dir() or path.suffix.lower() not in {".md", ".txt"}:
+            continue
+        normalized_name = normalize_source_name(path.stem)
+        if not normalized_name:
+            continue
+        if normalized_name != intent and not normalized_name.startswith(f"{intent}_"):
+            continue
+        text = path.read_text(encoding="utf-8").strip()
+        if not text:
+            continue
+        chunks = chunk_text(text, max_tokens, overlap)
+        return [
+            RetrievedChunk(
+                content=chunk,
+                score=1.0,
+                payload={
+                    "content": chunk,
+                    "intent": intent,
+                    "source_uri": str(path.relative_to(sources_dir)),
+                    "title": path.stem,
+                },
+            )
+            for chunk in chunks
+        ]
+    return []
+
+
 def classify_intent(user_message: str) -> str | None:
     lowered = user_message.lower()
     for intent, keywords in INTENT_KEYWORDS:
@@ -298,6 +352,14 @@ def retrieve_rag_context(
                 len(filtered_chunks),
                 normalized_intent,
             )
+            if not filtered_chunks:
+                LOGGER.warning("rag_intent_file_fallback intent=%s", normalized_intent)
+                filtered_chunks = load_intent_chunks(normalized_intent)
+                LOGGER.warning(
+                    "rag_intent_file_fallback_results count=%s intent=%s",
+                    len(filtered_chunks),
+                    normalized_intent,
+                )
         chunks = filtered_chunks
     best_chunks = chunks[:2]
     if best_chunks:
