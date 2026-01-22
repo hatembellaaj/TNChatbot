@@ -172,11 +172,7 @@ def build_rag_context(chunks: Iterable[RetrievedChunk]) -> str:
 
 
 def should_trigger_rag(intent: Optional[str], user_message: str) -> bool:
-    normalized_intent = (intent or "").strip().lower()
-    if normalized_intent in INTENTS_TRIGGERING_RAG:
-        return True
-    lowered = user_message.lower()
-    return any(keyword in lowered for keyword in KEYWORD_FALLBACKS)
+    return True
 
 
 def is_factual_question(user_message: str) -> bool:
