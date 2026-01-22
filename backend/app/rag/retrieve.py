@@ -212,7 +212,9 @@ def classify_intent(user_message: str) -> str | None:
     lowered = user_message.lower()
     for intent, keywords in INTENT_KEYWORDS:
         if any(keyword in lowered for keyword in keywords):
+            LOGGER.info("intent_classifier_hit intent=%s", intent)
             return intent
+    LOGGER.info("intent_classifier_miss")
     return None
 
 
@@ -230,6 +232,7 @@ def retrieve_rag_context(
         else DEFAULT_RAG_SCORE_THRESHOLD
     )
     normalized_intent = normalize_intent(intent)
+    LOGGER.info("rag_query_received query=%s", query)
     LOGGER.info(
         "rag_search_start intent=%s top_k=%s score_threshold=%s",
         normalized_intent or "none",
@@ -237,9 +240,11 @@ def retrieve_rag_context(
         score_threshold,
     )
     chunks = search_qdrant(vector, resolved_top_k, score_threshold, normalized_intent)
+    LOGGER.info("rag_search_results count=%s", len(chunks))
     if not chunks and normalized_intent:
         LOGGER.info("rag_intent_empty_fallback intent=%s", normalized_intent)
         chunks = search_qdrant(vector, resolved_top_k, score_threshold)
+        LOGGER.info("rag_search_fallback_results count=%s", len(chunks))
     best_chunk = chunks[:1]
     if best_chunk:
         LOGGER.info(

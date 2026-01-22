@@ -136,6 +136,11 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
     LOGGER.warning("intent_selected intent=%s source=%s", intent or "unknown", source)
 
     rag_triggered = should_trigger_rag(intent, payload.user_message)
+    LOGGER.warning(
+        "rag_trigger_decision intent=%s triggered=%s",
+        intent or "unknown",
+        rag_triggered,
+    )
     if rag_triggered:
         try:
             retrieved_context = retrieve_rag_context(
@@ -151,6 +156,11 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
 
     rag_empty_factual = (
         rag_triggered and not rag_context and is_factual_question(payload.user_message)
+    )
+    LOGGER.info(
+        "rag_context_status empty=%s length=%s",
+        not bool(rag_context),
+        len(rag_context),
     )
 
     messages = build_messages(
@@ -227,6 +237,11 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
     LOGGER.warning("intent_selected intent=%s source=%s", intent or "unknown", source)
 
     rag_triggered = should_trigger_rag(intent, payload.user_message)
+    LOGGER.warning(
+        "rag_trigger_decision intent=%s triggered=%s",
+        intent or "unknown",
+        rag_triggered,
+    )
     if rag_triggered:
         try:
             retrieved_context = retrieve_rag_context(
@@ -242,6 +257,11 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
 
     rag_empty_factual = (
         rag_triggered and not rag_context and is_factual_question(payload.user_message)
+    )
+    LOGGER.info(
+        "rag_context_status empty=%s length=%s",
+        not bool(rag_context),
+        len(rag_context),
     )
 
     messages = build_messages(
