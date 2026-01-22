@@ -1,7 +1,9 @@
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -205,6 +207,24 @@ def normalize_intent(intent: str | None) -> str | None:
     return normalized or None
 
 
+def normalize_source_name(source_name: str | None) -> str | None:
+    if not source_name:
+        return None
+    stem = Path(source_name).stem.strip().lower()
+    stem = re.sub(r"[\s\-]+", "_", stem)
+    return stem or None
+
+
+def source_matches_intent(payload: dict, intent: str) -> bool:
+    source_name = normalize_source_name(payload.get("source_uri"))
+    title_name = normalize_source_name(payload.get("title"))
+    if source_name and (source_name == intent or source_name.startswith(f"{intent}_")):
+        return True
+    if title_name and (title_name == intent or intent in title_name):
+        return True
+    return False
+
+
 def classify_intent(user_message: str) -> str | None:
     lowered = user_message.lower()
     for intent, keywords in INTENT_KEYWORDS:
@@ -229,19 +249,56 @@ def retrieve_rag_context(
         else DEFAULT_RAG_SCORE_THRESHOLD
     )
     normalized_intent = normalize_intent(intent)
-    LOGGER.info("rag_query_received query=%s", query)
-    LOGGER.info(
+    LOGGER.warning("rag_query_received query=%s", query)
+    LOGGER.warning(
         "rag_search_start intent=%s top_k=%s score_threshold=%s",
         normalized_intent or "none",
         resolved_top_k,
         score_threshold,
     )
     chunks = search_qdrant(vector, resolved_top_k, score_threshold, normalized_intent)
-    LOGGER.info("rag_search_results count=%s", len(chunks))
-    if not chunks and normalized_intent:
-        LOGGER.info("rag_intent_empty_fallback intent=%s", normalized_intent)
-        chunks = search_qdrant(vector, resolved_top_k, score_threshold)
-        LOGGER.info("rag_search_fallback_results count=%s", len(chunks))
+    LOGGER.warning("rag_search_results count=%s", len(chunks))
+    if not chunks:
+        LOGGER.warning(
+            "rag_search_empty_retry intent=%s score_threshold=None",
+            normalized_intent or "none",
+        )
+        chunks = search_qdrant(vector, resolved_top_k, None, normalized_intent)
+        LOGGER.warning("rag_search_retry_results count=%s", len(chunks))
+    if normalized_intent:
+        filtered_chunks = [
+            chunk
+            for chunk in chunks
+            if source_matches_intent(chunk.payload, normalized_intent)
+        ]
+        LOGGER.warning(
+            "rag_search_results_filtered count=%s intent=%s",
+            len(filtered_chunks),
+            normalized_intent,
+        )
+        if not filtered_chunks:
+            LOGGER.warning("rag_intent_empty_fallback intent=%s", normalized_intent)
+            LOGGER.warning("rag_intent_source_fallback intent=%s", normalized_intent)
+            chunks = search_qdrant(vector, resolved_top_k, score_threshold)
+            LOGGER.warning("rag_search_fallback_results count=%s", len(chunks))
+            if not chunks:
+                LOGGER.warning(
+                    "rag_search_fallback_empty_retry intent=%s score_threshold=None",
+                    normalized_intent,
+                )
+                chunks = search_qdrant(vector, resolved_top_k, None)
+                LOGGER.warning("rag_search_fallback_retry_results count=%s", len(chunks))
+            filtered_chunks = [
+                chunk
+                for chunk in chunks
+                if source_matches_intent(chunk.payload, normalized_intent)
+            ]
+            LOGGER.warning(
+                "rag_search_fallback_filtered count=%s intent=%s",
+                len(filtered_chunks),
+                normalized_intent,
+            )
+        chunks = filtered_chunks
     best_chunks = chunks[:2]
     if best_chunks:
         for index, chunk in enumerate(best_chunks, start=1):
@@ -253,5 +310,5 @@ def retrieve_rag_context(
             )
             LOGGER.warning("rag_context_sent_to_llm index=%s content=%s", index, chunk.content)
     else:
-        LOGGER.info("rag_no_chunk_selected")
+        LOGGER.warning("rag_no_chunk_selected")
     return build_rag_context(best_chunks)
