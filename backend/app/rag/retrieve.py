@@ -258,6 +258,13 @@ def retrieve_rag_context(
     )
     chunks = search_qdrant(vector, resolved_top_k, score_threshold, normalized_intent)
     LOGGER.info("rag_search_results count=%s", len(chunks))
+    if not chunks:
+        LOGGER.info(
+            "rag_search_empty_retry intent=%s score_threshold=None",
+            normalized_intent or "none",
+        )
+        chunks = search_qdrant(vector, resolved_top_k, None, normalized_intent)
+        LOGGER.info("rag_search_retry_results count=%s", len(chunks))
     if normalized_intent:
         filtered_chunks = [
             chunk
@@ -274,6 +281,13 @@ def retrieve_rag_context(
             LOGGER.info("rag_intent_source_fallback intent=%s", normalized_intent)
             chunks = search_qdrant(vector, resolved_top_k, score_threshold)
             LOGGER.info("rag_search_fallback_results count=%s", len(chunks))
+            if not chunks:
+                LOGGER.info(
+                    "rag_search_fallback_empty_retry intent=%s score_threshold=None",
+                    normalized_intent,
+                )
+                chunks = search_qdrant(vector, resolved_top_k, None)
+                LOGGER.info("rag_search_fallback_retry_results count=%s", len(chunks))
             filtered_chunks = [
                 chunk
                 for chunk in chunks
