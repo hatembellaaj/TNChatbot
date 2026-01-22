@@ -19,6 +19,7 @@ from app.llm.prompts import build_messages
 from app.llm.validator import build_fallback_response, validate_or_fallback
 from app.rag.retrieve import (
     build_config,
+    classify_intent,
     is_factual_question,
     retrieve_rag_context,
     should_trigger_rag,
@@ -128,12 +129,24 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
     config = build_config({**admin_config, **context_config})
     rag_context = payload.context.get("rag_context", "")
     step = payload.state.get("step", "UNKNOWN")
-    intent = payload.state.get("intent") or payload.context.get("intent")
+    raw_intent = payload.state.get("intent") or payload.context.get("intent")
+    inferred_intent = None if raw_intent else classify_intent(payload.user_message)
+    intent = raw_intent or inferred_intent
+    source = "payload" if raw_intent else ("inferred" if inferred_intent else "none")
+    LOGGER.warning("intent_selected intent=%s source=%s", intent or "unknown", source)
 
     rag_triggered = should_trigger_rag(intent, payload.user_message)
+    LOGGER.warning(
+        "rag_trigger_decision intent=%s triggered=%s",
+        intent or "unknown",
+        rag_triggered,
+    )
     if rag_triggered:
         try:
-            retrieved_context = retrieve_rag_context(payload.user_message)
+            retrieved_context = retrieve_rag_context(
+                payload.user_message,
+                intent=intent,
+            )
             rag_context = "\n\n".join(
                 [context for context in (rag_context, retrieved_context) if context]
             )
@@ -143,6 +156,11 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
 
     rag_empty_factual = (
         rag_triggered and not rag_context and is_factual_question(payload.user_message)
+    )
+    LOGGER.info(
+        "rag_context_status empty=%s length=%s",
+        not bool(rag_context),
+        len(rag_context),
     )
 
     messages = build_messages(
@@ -212,12 +230,24 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
     config = build_config({**admin_config, **context_config})
     rag_context = payload.context.get("rag_context", "")
     step = payload.state.get("step", "UNKNOWN")
-    intent = payload.state.get("intent") or payload.context.get("intent")
+    raw_intent = payload.state.get("intent") or payload.context.get("intent")
+    inferred_intent = None if raw_intent else classify_intent(payload.user_message)
+    intent = raw_intent or inferred_intent
+    source = "payload" if raw_intent else ("inferred" if inferred_intent else "none")
+    LOGGER.warning("intent_selected intent=%s source=%s", intent or "unknown", source)
 
     rag_triggered = should_trigger_rag(intent, payload.user_message)
+    LOGGER.warning(
+        "rag_trigger_decision intent=%s triggered=%s",
+        intent or "unknown",
+        rag_triggered,
+    )
     if rag_triggered:
         try:
-            retrieved_context = retrieve_rag_context(payload.user_message)
+            retrieved_context = retrieve_rag_context(
+                payload.user_message,
+                intent=intent,
+            )
             rag_context = "\n\n".join(
                 [context for context in (rag_context, retrieved_context) if context]
             )
@@ -227,6 +257,11 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
 
     rag_empty_factual = (
         rag_triggered and not rag_context and is_factual_question(payload.user_message)
+    )
+    LOGGER.info(
+        "rag_context_status empty=%s length=%s",
+        not bool(rag_context),
+        len(rag_context),
     )
 
     messages = build_messages(
