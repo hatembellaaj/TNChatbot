@@ -1,5 +1,5 @@
-Les demandes des lecteurs concernant les articles,
-les commentaires ou le contenu éditorial
-ne sont pas prises en charge par ce chatbot.
-Ces demandes doivent être redirigées
-vers les canaux de contact généraux du site.
+Alias: lecteurs, article, commentaire, rédaction
+
+Les demandes des lecteurs concernant les articles, les commentaires ou le contenu éditorial ne sont pas prises en charge par ce chatbot.
+
+Elles doivent être redirigées vers le formulaire de contact général du site.

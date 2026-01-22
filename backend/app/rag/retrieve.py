@@ -20,10 +20,20 @@ DEFAULT_RAG_CHUNK_OVERLAP = 80
 
 LOGGER = logging.getLogger(__name__)
 
+INTENT_SCORE_THRESHOLD_FALLBACKS = {
+    "audience": 0.0,
+    "overview": 0.0,
+    "solutions": 0.0,
+}
+
 INTENTS_TRIGGERING_RAG = {
     "audience",
     "offres",
     "formats",
+    "display",
+    "content",
+    "video",
+    "newsletter_audio",
     "immoneuf",
     "premium",
     "mag",
@@ -46,11 +56,15 @@ INTENT_KEYWORDS = [
     ("welcome_scope", {"bonjour", "bonsoir", "salut", "hello", "hey", "coucou"}),
     ("audience", {"audience", "lecteurs", "lectorat"}),
     ("solutions", {"offre", "offres", "produit", "produits", "solution", "solutions"}),
-    ("formats", {"format", "formats", "video", "vidéo"}),
+    ("display", {"display", "banniere", "bannières", "banner", "banners"}),
+    ("content", {"contenu", "contenus", "sponsorisé", "sponsorise", "article"}),
+    ("video", {"format video", "vidéo", "video"}),
+    ("newsletter_audio", {"newsletter", "audio", "emailing"}),
+    ("innovation", {"innovation", "innovant", "innovante", "operation speciale"}),
+    ("mag", {"mag", "magazine"}),
+    ("formats", {"format", "formats"}),
     ("immoneuf", {"immoneuf", "immobilier neuf", "neuf"}),
     ("premium", {"premium"}),
-    ("mag", {"mag", "magazine"}),
-    ("innovation", {"innovation", "innovant", "innovante"}),
 ]
 
 FACTUAL_TOKENS = {
@@ -112,6 +126,7 @@ class RetrievedChunk:
     content: str
     score: float
     payload: dict
+    point_id: str | int | None = None
 
 
 def chunk_text(text: str, max_tokens: int, overlap: int) -> List[str]:
@@ -161,6 +176,7 @@ def search_qdrant(
     for item in result:
         payload = item.get("payload", {})
         score = item.get("score", 0.0)
+        point_id = item.get("id")
         if score_threshold is not None and score < score_threshold:
             continue
         chunks.append(
@@ -168,6 +184,7 @@ def search_qdrant(
                 content=payload.get("content", ""),
                 score=score,
                 payload=payload,
+                point_id=point_id,
             )
         )
     return chunks
@@ -273,8 +290,9 @@ def load_intent_chunks(intent: str) -> List[RetrievedChunk]:
                     "source_uri": str(path.relative_to(sources_dir)),
                     "title": path.stem,
                 },
+                point_id=f"file:{path.stem}:{index}",
             )
-            for chunk in chunks
+            for index, chunk in enumerate(chunks, start=1)
         ]
     return []
 
@@ -296,6 +314,7 @@ def retrieve_rag_context(
 ) -> str:
     vector = embed_query(query)
     resolved_top_k = top_k or int(os.getenv("RAG_TOP_K", DEFAULT_RAG_TOP_K))
+    collection = os.getenv("QDRANT_COLLECTION", DEFAULT_QDRANT_COLLECTION)
     score_threshold_env = os.getenv("RAG_SCORE_THRESHOLD")
     score_threshold = (
         float(score_threshold_env)
@@ -303,7 +322,13 @@ def retrieve_rag_context(
         else DEFAULT_RAG_SCORE_THRESHOLD
     )
     normalized_intent = normalize_intent(intent)
-    LOGGER.warning("rag_query_received query=%s", query)
+    LOGGER.warning(
+        "rag_query_received query=%s collection=%s top_k=%s score_threshold=%s",
+        query,
+        collection,
+        resolved_top_k,
+        score_threshold,
+    )
     LOGGER.warning(
         "rag_search_start intent=%s top_k=%s score_threshold=%s",
         normalized_intent or "none",
@@ -311,14 +336,41 @@ def retrieve_rag_context(
         score_threshold,
     )
     chunks = search_qdrant(vector, resolved_top_k, score_threshold, normalized_intent)
-    LOGGER.warning("rag_search_results count=%s", len(chunks))
+    LOGGER.warning(
+        "rag_search_results count=%s doc_ids=%s",
+        len(chunks),
+        [chunk.point_id for chunk in chunks],
+    )
     if not chunks:
-        LOGGER.warning(
-            "rag_search_empty_retry intent=%s score_threshold=None",
-            normalized_intent or "none",
-        )
-        chunks = search_qdrant(vector, resolved_top_k, None, normalized_intent)
-        LOGGER.warning("rag_search_retry_results count=%s", len(chunks))
+        fallback_threshold = INTENT_SCORE_THRESHOLD_FALLBACKS.get(normalized_intent or "")
+        if fallback_threshold is not None and fallback_threshold != score_threshold:
+            LOGGER.warning(
+                "rag_search_threshold_fallback intent=%s score_threshold=%s",
+                normalized_intent or "none",
+                fallback_threshold,
+            )
+            chunks = search_qdrant(
+                vector,
+                resolved_top_k,
+                fallback_threshold,
+                normalized_intent,
+            )
+            LOGGER.warning(
+                "rag_search_threshold_results count=%s doc_ids=%s",
+                len(chunks),
+                [chunk.point_id for chunk in chunks],
+            )
+        if not chunks:
+            LOGGER.warning(
+                "rag_search_empty_retry intent=%s score_threshold=None",
+                normalized_intent or "none",
+            )
+            chunks = search_qdrant(vector, resolved_top_k, None, normalized_intent)
+            LOGGER.warning(
+                "rag_search_retry_results count=%s doc_ids=%s",
+                len(chunks),
+                [chunk.point_id for chunk in chunks],
+            )
     if normalized_intent:
         filtered_chunks = [
             chunk
@@ -334,14 +386,22 @@ def retrieve_rag_context(
             LOGGER.warning("rag_intent_empty_fallback intent=%s", normalized_intent)
             LOGGER.warning("rag_intent_source_fallback intent=%s", normalized_intent)
             chunks = search_qdrant(vector, resolved_top_k, score_threshold)
-            LOGGER.warning("rag_search_fallback_results count=%s", len(chunks))
+            LOGGER.warning(
+                "rag_search_fallback_results count=%s doc_ids=%s",
+                len(chunks),
+                [chunk.point_id for chunk in chunks],
+            )
             if not chunks:
                 LOGGER.warning(
                     "rag_search_fallback_empty_retry intent=%s score_threshold=None",
                     normalized_intent,
                 )
                 chunks = search_qdrant(vector, resolved_top_k, None)
-                LOGGER.warning("rag_search_fallback_retry_results count=%s", len(chunks))
+                LOGGER.warning(
+                    "rag_search_fallback_retry_results count=%s doc_ids=%s",
+                    len(chunks),
+                    [chunk.point_id for chunk in chunks],
+                )
             filtered_chunks = [
                 chunk
                 for chunk in chunks
@@ -354,7 +414,7 @@ def retrieve_rag_context(
             )
             if not filtered_chunks:
                 LOGGER.warning("rag_intent_file_fallback intent=%s", normalized_intent)
-                filtered_chunks = load_intent_chunks(normalized_intent)
+                filtered_chunks = load_intent_chunks(normalized_intent)[:1]
                 LOGGER.warning(
                     "rag_intent_file_fallback_results count=%s intent=%s",
                     len(filtered_chunks),

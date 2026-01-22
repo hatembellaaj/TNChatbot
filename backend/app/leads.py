@@ -6,32 +6,51 @@ from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel, EmailStr, Field, validator
 
 from app.db import get_connection
-from app.notifications.emailer import EmailDeliveryError, send_email
+from app.notifications.emailer import build_lead_body, build_lead_subject, EmailDeliveryError, send_email
 
 router = APIRouter()
+
+SECTOR_OPTIONS = {
+    "Banque",
+    "Télécom",
+    "Immobilier",
+    "Retail",
+    "Industrie",
+    "Services",
+    "Institution",
+    "Autre",
+}
 
 
 class LeadBase(BaseModel):
     lead_type: str
-    full_name: str = Field(..., min_length=1)
+    first_name: str = Field(..., min_length=1)
+    last_name: str = Field(..., min_length=1)
     company: str = Field(..., min_length=1)
     email: EmailStr
     phone: str = Field(..., min_length=1)
+    job_title: str | None = None
+    sector: str | None = None
+    need_type: str | None = None
+    budget_range: str | None = None
     entry_path: str | None = None
     message: str | None = None
 
-    @validator("full_name", "company", "phone")
+    @validator("first_name", "last_name", "company", "phone")
     def normalize_required(cls, value: str) -> str:
         trimmed = value.strip()
         if not trimmed:
             raise ValueError("This field is required.")
         return trimmed
 
-    @validator("company")
-    def require_b2b_mention(cls, value: str) -> str:
-        if "b2b" not in value.lower():
-            raise ValueError("Company must mention B2B.")
-        return value
+    @validator("sector")
+    def validate_sector(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        trimmed = value.strip()
+        if trimmed not in SECTOR_OPTIONS:
+            raise ValueError("Invalid sector value.")
+        return trimmed
 
 
 class StandardLead(LeadBase):
@@ -40,25 +59,24 @@ class StandardLead(LeadBase):
 
 class ImmoneufLead(LeadBase):
     lead_type: Literal["immoneuf"] = "immoneuf"
-    program_name: str | None = None
-    project_city: str | None = None
-    unit_count: int | None = Field(default=None, ge=1)
-    delivery_window: str | None = None
+    project_cities: str | None = None
+    project_types: str | None = None
+    projects_count: int | None = Field(default=None, ge=1)
+    marketing_period: str | None = None
 
 
 class PremiumLead(LeadBase):
     lead_type: Literal["premium"] = "premium"
-    user_count: int = Field(..., ge=1)
+    estimated_users: int = Field(..., ge=1)
 
 
 class PartnershipLead(LeadBase):
-    lead_type: Literal["partenariat"] = "partenariat"
-    priority: str = Field(..., min_length=1)
+    lead_type: Literal["partnership"] = "partnership"
+    partnership_priority: str = Field(..., min_length=1)
 
 
 class CallbackLead(LeadBase):
     lead_type: Literal["callback"] = "callback"
-    preferred_time: str | None = None
 
 
 LeadCreate = Annotated[
@@ -73,13 +91,22 @@ class LeadCreateResponse(BaseModel):
     export_log_id: str
 
 
+def _build_full_name(payload: LeadBase) -> str:
+    return f"{payload.first_name} {payload.last_name}".strip()
+
+
 def _build_extra_json(payload: LeadBase) -> Dict[str, Any]:
     base_fields = {
         "lead_type",
-        "full_name",
+        "first_name",
+        "last_name",
         "company",
         "email",
         "phone",
+        "job_title",
+        "sector",
+        "need_type",
+        "budget_range",
         "entry_path",
         "message",
     }
@@ -87,55 +114,35 @@ def _build_extra_json(payload: LeadBase) -> Dict[str, Any]:
     return {key: value for key, value in raw.items() if key not in base_fields}
 
 
-def _build_email_body(payload: LeadBase, extra_json: Dict[str, Any], timestamp: str) -> str:
-    lines = [
-        "Nouvelle demande lead.",
-        f"Type: {payload.lead_type}",
-        f"Nom complet: {payload.full_name}",
-        f"Société: {payload.company}",
-        f"Email: {payload.email}",
-        f"Téléphone: {payload.phone}",
-        "B2B: oui (mention dans société)",
-    ]
-
-    if payload.entry_path:
-        lines.append(f"Entry path: {payload.entry_path}")
-    if payload.message:
-        lines.append(f"Message: {payload.message}")
+def _build_email_fields(payload: LeadBase, extra_json: Dict[str, Any]) -> Dict[str, Any]:
+    fields = {
+        "Type": payload.lead_type,
+        "Prénom": payload.first_name,
+        "Nom": payload.last_name,
+        "Société": payload.company,
+        "Email": payload.email,
+        "Téléphone": payload.phone,
+        "Poste": payload.job_title or "",
+        "Secteur": payload.sector or "",
+        "Besoin": payload.need_type or "",
+        "Budget": payload.budget_range or "",
+        "Message": payload.message or "",
+    }
     if extra_json:
-        lines.append(f"Champs spécifiques: {json.dumps(extra_json, ensure_ascii=False)}")
-    lines.append(f"Horodatage: {timestamp}")
-    return "\n".join(lines)
-
-
-def _build_wizard_email_body(
-    *,
-    full_name: str,
-    company: str,
-    email: str,
-    phone: str,
-    extra_json: Dict[str, Any],
-    timestamp: str,
-) -> str:
-    lines = [
-        "Nouveau lead issu du wizard.",
-        f"Nom complet: {full_name}",
-        f"Société: {company}",
-        f"Email: {email}",
-        f"Téléphone: {phone}",
-    ]
-    if extra_json:
-        lines.append(f"Champs wizard: {json.dumps(extra_json, ensure_ascii=False)}")
-    lines.append(f"Horodatage: {timestamp}")
-    return "\n".join(lines)
+        fields["Champs spécifiques"] = json.dumps(extra_json, ensure_ascii=False)
+    return fields
 
 
 @router.post("/api/leads", response_model=LeadCreateResponse)
 def create_lead(payload: LeadCreate) -> LeadCreateResponse:
     extra_json = _build_extra_json(payload)
     timestamp = datetime.now(timezone.utc).isoformat()
-    subject = f"[CHATBOT ANNONCEURS] Nouvelle demande – {payload.company}"
-    body = _build_email_body(payload, extra_json, timestamp)
+    subject = build_lead_subject(payload.company)
+    body = build_lead_body(
+        _build_email_fields(payload, extra_json),
+        payload.entry_path,
+        timestamp,
+    )
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -146,13 +153,22 @@ def create_lead(payload: LeadCreate) -> LeadCreateResponse:
                 RETURNING id
                 """,
                 (
-                    payload.full_name,
+                    _build_full_name(payload),
                     payload.company,
                     payload.email,
                     payload.phone,
                     payload.entry_path,
                     payload.lead_type,
-                    json.dumps(extra_json),
+                    json.dumps(
+                        {
+                            "job_title": payload.job_title,
+                            "sector": payload.sector,
+                            "need_type": payload.need_type,
+                            "budget_range": payload.budget_range,
+                            "message": payload.message,
+                            **extra_json,
+                        }
+                    ),
                 ),
             )
             lead_id = cur.fetchone()[0]
@@ -208,29 +224,51 @@ def create_lead(payload: LeadCreate) -> LeadCreateResponse:
 
 
 def create_wizard_lead(slots: Dict[str, str]) -> None:
-    first_name = slots.get("lead_first_name", "").strip()
-    last_name = slots.get("lead_last_name", "").strip()
-    company = slots.get("lead_company", "").strip()
-    email = slots.get("lead_email", "").strip()
-    phone = slots.get("lead_phone", "").strip()
+    first_name = slots.get("first_name", "").strip()
+    last_name = slots.get("last_name", "").strip()
+    company = slots.get("company", "").strip()
+    email = slots.get("email", "").strip()
+    phone = slots.get("phone", "").strip()
     if not all([first_name, last_name, company, email, phone]):
         raise ValueError("Missing required wizard lead fields.")
 
-    full_name = f"{first_name} {last_name}".strip()
+    lead_type = slots.get("lead_type", "standard")
+    entry_path = slots.get("entry_path")
+
     extra_json = {
-        "client_type": slots.get("qual_client_type"),
-        "objective": slots.get("qual_objective"),
-        "budget": slots.get("qual_budget"),
+        "client_type": slots.get("client_type"),
+        "objective": slots.get("objective"),
+        "budget_range": slots.get("budget_range"),
+        "job_title": slots.get("job_title"),
+        "sector": slots.get("sector"),
+        "need_type": slots.get("need_type"),
+        "message": slots.get("message"),
+        "project_cities": slots.get("project_cities"),
+        "project_types": slots.get("project_types"),
+        "projects_count": slots.get("projects_count"),
+        "marketing_period": slots.get("marketing_period"),
+        "estimated_users": slots.get("estimated_users"),
+        "partnership_priority": slots.get("partnership_priority"),
     }
     timestamp = datetime.now(timezone.utc).isoformat()
-    subject = f"[CHATBOT ANNONCEURS] Nouveau lead – {company}"
-    body = _build_wizard_email_body(
-        full_name=full_name,
-        company=company,
-        email=email,
-        phone=phone,
-        extra_json=extra_json,
-        timestamp=timestamp,
+    subject = build_lead_subject(company)
+    body = build_lead_body(
+        {
+            "Type": lead_type,
+            "Prénom": first_name,
+            "Nom": last_name,
+            "Société": company,
+            "Email": email,
+            "Téléphone": phone,
+            "Poste": slots.get("job_title", ""),
+            "Secteur": slots.get("sector", ""),
+            "Besoin": slots.get("need_type", ""),
+            "Budget": slots.get("budget_range", ""),
+            "Message": slots.get("message", ""),
+            "Champs spécifiques": json.dumps(extra_json, ensure_ascii=False),
+        },
+        entry_path,
+        timestamp,
     )
 
     with get_connection() as conn:
@@ -242,12 +280,12 @@ def create_wizard_lead(slots: Dict[str, str]) -> None:
                 RETURNING id
                 """,
                 (
-                    full_name,
+                    f"{first_name} {last_name}".strip(),
                     company,
                     email,
                     phone,
-                    "wizard",
-                    "wizard",
+                    entry_path,
+                    lead_type,
                     json.dumps(extra_json),
                 ),
             )
@@ -276,7 +314,7 @@ def create_wizard_lead(slots: Dict[str, str]) -> None:
                 (
                     "leads",
                     "queued",
-                    json.dumps({"lead_id": str(lead_id), "lead_type": "wizard"}),
+                    json.dumps({"lead_id": str(lead_id), "lead_type": lead_type}),
                 ),
             )
             export_log_id = cur.fetchone()[0]
