@@ -38,7 +38,7 @@ KEYWORD_FALLBACKS = {
 }
 
 INTENT_KEYWORDS = [
-    ("welcome", {"bonjour", "bonsoir", "salut", "hello", "hey", "coucou"}),
+    ("welcome_scope", {"bonjour", "bonsoir", "salut", "hello", "hey", "coucou"}),
     ("audience", {"audience", "lecteurs", "lectorat"}),
     ("solutions", {"offre", "offres", "produit", "produits", "solution", "solutions"}),
     ("formats", {"format", "formats", "video", "vidéo"}),
