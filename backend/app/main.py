@@ -153,6 +153,8 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
         except Exception as exc:  # noqa: BLE001 - log and continue with empty context
             LOGGER.warning("RAG retrieval failed", exc_info=exc)
         LOGGER.info("rag_used=true intent=%s", intent or "unknown")
+    else:
+        LOGGER.warning("rag_skipped reason=not_triggered intent=%s", intent or "unknown")
 
     rag_empty_factual = (
         rag_triggered and not rag_context and is_factual_question(payload.user_message)
@@ -254,6 +256,8 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
         except Exception as exc:  # noqa: BLE001 - log and continue with empty context
             LOGGER.warning("RAG retrieval failed", exc_info=exc)
         LOGGER.info("rag_used=true intent=%s", intent or "unknown")
+    else:
+        LOGGER.warning("rag_skipped reason=not_triggered intent=%s", intent or "unknown")
 
     rag_empty_factual = (
         rag_triggered and not rag_context and is_factual_question(payload.user_message)
