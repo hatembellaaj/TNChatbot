@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import json
@@ -9,6 +10,7 @@ Contraintes obligatoires :
 - Réponds uniquement en français.
 - Utilise exclusivement le contexte RAG.
 - N'invente jamais d'information.
+- Si un contexte RAG est fourni, ta réponse doit reprendre explicitement ses informations (pas de réponse générique).
 - Si le contexte est insuffisant, dis-le poliment.
 - Réponds uniquement avec un JSON valide conforme EXACTEMENT au schéma :
 
@@ -24,6 +26,7 @@ Contraintes obligatoires :
 Aucun texte hors JSON. Aucun champ supplémentaire.
 """.strip()
 
+LOGGER = logging.getLogger(__name__)
 
 DEFAULT_PROMPT_MAX_TOKENS = 250
 
@@ -84,12 +87,28 @@ def _trim_rag_context(
         + _estimate_tokens(user_message)
     )
     available = max(max_tokens - base_tokens, 0)
+    rag_token_count = _estimate_tokens(rag_context)
+    LOGGER.info(
+        "rag_context_trim_check max_tokens=%s base_tokens=%s available=%s rag_tokens=%s",
+        max_tokens,
+        base_tokens,
+        available,
+        rag_token_count,
+    )
     if not rag_context or available <= 0:
+        if rag_context:
+            LOGGER.warning("rag_context_trimmed_to_empty reason=no_available_tokens")
         return ""
     rag_tokens = re.findall(r"\S+", rag_context)
     if len(rag_tokens) <= available:
         return rag_context
-    return " ".join(rag_tokens[:available])
+    trimmed = " ".join(rag_tokens[:available])
+    LOGGER.warning(
+        "rag_context_trimmed_to_fit original_tokens=%s trimmed_tokens=%s",
+        len(rag_tokens),
+        available,
+    )
+    return trimmed
 
 
 def _trim_developer_prompt(
@@ -147,6 +166,11 @@ def build_messages(
     developer_prompt = _trim_developer_prompt(
         developer_prompt,
         user_message=user_message,
+    )
+    LOGGER.info(
+        "developer_prompt_tokens=%s rag_context_included=%s",
+        _estimate_tokens(developer_prompt),
+        bool(rag_context and rag_context in developer_prompt),
     )
 
     return [

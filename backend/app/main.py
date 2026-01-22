@@ -156,6 +156,10 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
     else:
         LOGGER.warning("rag_skipped reason=not_triggered intent=%s", intent or "unknown")
 
+    if rag_context:
+        allowed_buttons = []
+        LOGGER.info("rag_buttons_disabled reason=rag_context_present")
+
     rag_empty_factual = (
         rag_triggered and not rag_context and is_factual_question(payload.user_message)
     )
@@ -258,6 +262,10 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
         LOGGER.info("rag_used=true intent=%s", intent or "unknown")
     else:
         LOGGER.warning("rag_skipped reason=not_triggered intent=%s", intent or "unknown")
+
+    if rag_context:
+        allowed_buttons = []
+        LOGGER.info("rag_buttons_disabled reason=rag_context_present")
 
     rag_empty_factual = (
         rag_triggered and not rag_context and is_factual_question(payload.user_message)
