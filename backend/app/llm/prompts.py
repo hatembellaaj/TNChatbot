@@ -10,6 +10,7 @@ Contraintes obligatoires :
 - Réponds uniquement en français.
 - Utilise exclusivement le contexte RAG.
 - N'invente jamais d'information.
+- Si un contexte RAG est fourni, ta réponse doit reprendre explicitement ses informations (pas de réponse générique).
 - Si le contexte est insuffisant, dis-le poliment.
 - Réponds uniquement avec un JSON valide conforme EXACTEMENT au schéma :
 
