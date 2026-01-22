@@ -242,14 +242,16 @@ def retrieve_rag_context(
         LOGGER.info("rag_intent_empty_fallback intent=%s", normalized_intent)
         chunks = search_qdrant(vector, resolved_top_k, score_threshold)
         LOGGER.info("rag_search_fallback_results count=%s", len(chunks))
-    best_chunk = chunks[:1]
-    if best_chunk:
-        LOGGER.info(
-            "rag_best_chunk_selected score=%.4f source=%s",
-            best_chunk[0].score,
-            best_chunk[0].payload.get("source_uri", "unknown"),
-        )
-        LOGGER.info("rag_context_sent_to_llm content=%s", best_chunk[0].content)
+    best_chunks = chunks[:2]
+    if best_chunks:
+        for index, chunk in enumerate(best_chunks, start=1):
+            LOGGER.warning(
+                "rag_chunk_selected index=%s score=%.4f source=%s",
+                index,
+                chunk.score,
+                chunk.payload.get("source_uri", "unknown"),
+            )
+            LOGGER.warning("rag_context_sent_to_llm index=%s content=%s", index, chunk.content)
     else:
         LOGGER.info("rag_no_chunk_selected")
-    return build_rag_context(best_chunk)
+    return build_rag_context(best_chunks)
