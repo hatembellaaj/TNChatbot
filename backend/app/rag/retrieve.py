@@ -38,8 +38,9 @@ KEYWORD_FALLBACKS = {
 }
 
 INTENT_KEYWORDS = [
+    ("welcome", {"bonjour", "bonsoir", "salut", "hello", "hey", "coucou"}),
     ("audience", {"audience", "lecteurs", "lectorat"}),
-    ("offres", {"offre", "offres", "produit", "produits"}),
+    ("solutions", {"offre", "offres", "produit", "produits", "solution", "solutions"}),
     ("formats", {"format", "formats", "video", "vidéo"}),
     ("immoneuf", {"immoneuf", "immobilier neuf", "neuf"}),
     ("premium", {"premium"}),
