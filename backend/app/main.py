@@ -18,7 +18,20 @@ from app.llm.client import LLMClientError, call_llm
 from app.llm.prompts import build_messages
 from app.llm.validator import (
     build_fallback_response_with_step,
+    normalize_llm_text,
     validate_or_fallback,
+)
+from app.orchestrator.state_machine import (
+    ConversationStep,
+    build_response,
+    build_wizard_prompt,
+    get_buttons_for_step,
+    handle_step,
+    is_wizard_step,
+    match_button_id,
+    normalize_step,
+    resolve_next_step,
+    serialize_buttons,
 )
 from app.rag.retrieve import (
     build_config,
@@ -131,12 +144,73 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
     context_config = payload.context.get("config") or {}
     config = build_config({**admin_config, **context_config})
     rag_context = payload.context.get("rag_context", "")
-    step = payload.state.get("step", "UNKNOWN")
+    raw_step = payload.state.get("step", "UNKNOWN")
+    resolved_step = normalize_step(raw_step) or ConversationStep.MAIN_MENU
+    step = resolved_step.value
     raw_intent = payload.state.get("intent") or payload.context.get("intent")
     inferred_intent = None if raw_intent else classify_intent(payload.user_message)
     intent = raw_intent or inferred_intent
     source = "payload" if raw_intent else ("inferred" if inferred_intent else "none")
     LOGGER.warning("intent_selected intent=%s source=%s", intent or "unknown", source)
+
+    slots = payload.state.get("slots")
+    if not isinstance(slots, dict):
+        slots = {}
+
+    button_id = payload.state.get("button_id")
+    if not isinstance(button_id, str):
+        button_id = match_button_id(resolved_step, payload.user_message)
+
+    next_step = resolve_next_step(resolved_step, button_id, intent)
+
+    if is_wizard_step(resolved_step) or resolved_step == ConversationStep.BUDGET_CLIENT_TYPE:
+        wizard_payload = handle_step(
+            resolved_step,
+            payload.user_message,
+            button_id,
+            slots,
+        )
+        with get_connection() as conn:
+            result = conn.execute(
+                "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
+                (wizard_payload["suggested_next_step"], payload.session_id),
+            )
+            if result.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Session not found")
+        return ChatMessageResponse(
+            assistant_message=wizard_payload["assistant_message"],
+            buttons=[ChatButton(**button) for button in wizard_payload["buttons"]],
+            suggested_next_step=wizard_payload["suggested_next_step"],
+            slot_updates=wizard_payload["slot_updates"],
+            handoff=wizard_payload["handoff"],
+            safety=wizard_payload["safety"],
+        )
+
+    if is_wizard_step(next_step):
+        wizard_payload = build_response(
+            resolved_step,
+            build_wizard_prompt(next_step),
+            get_buttons_for_step(next_step),
+            next_step,
+            {},
+            handoff={"requested": False},
+            safety={"rag_used": False},
+        )
+        with get_connection() as conn:
+            result = conn.execute(
+                "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
+                (wizard_payload["suggested_next_step"], payload.session_id),
+            )
+            if result.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Session not found")
+        return ChatMessageResponse(
+            assistant_message=wizard_payload["assistant_message"],
+            buttons=[ChatButton(**button) for button in wizard_payload["buttons"]],
+            suggested_next_step=wizard_payload["suggested_next_step"],
+            slot_updates=wizard_payload["slot_updates"],
+            handoff=wizard_payload["handoff"],
+            safety=wizard_payload["safety"],
+        )
 
     rag_triggered = should_trigger_rag(intent, payload.user_message)
     LOGGER.warning(
@@ -182,7 +256,7 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
         user_message=payload.user_message,
     )
 
-    default_next_step = payload.state.get("step", "MAIN_MENU")
+    default_next_step = next_step.value
 
     try:
         llm_response = call_llm(messages)
@@ -197,6 +271,7 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
             llm_response,
             allowed_buttons,
             default_next_step,
+            text_only=True,
         )
 
     except LLMClientError as exc:
@@ -208,7 +283,10 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
         validated = build_fallback_response_with_step(default_next_step)
 
 
-    next_step = validated.get("suggested_next_step", default_next_step)
+    next_step = default_next_step
+    buttons = get_buttons_for_step(resolved_step)
+    if button_id:
+        buttons = get_buttons_for_step(ConversationStep(next_step))
     with get_connection() as conn:
         result = conn.execute(
             "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
@@ -218,12 +296,12 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
             raise HTTPException(status_code=404, detail="Session not found")
 
     return ChatMessageResponse(
-        assistant_message=validated["assistant_message"],
-        buttons=[ChatButton(**button) for button in validated["buttons"]],
-        suggested_next_step=validated["suggested_next_step"],
-        slot_updates=validated["slot_updates"],
-        handoff=validated["handoff"],
-        safety=validated["safety"],
+        assistant_message=normalize_llm_text(validated["assistant_message"]),
+        buttons=[ChatButton(**button) for button in serialize_buttons(buttons)],
+        suggested_next_step=next_step,
+        slot_updates={},
+        handoff={"requested": False},
+        safety={"rag_used": bool(rag_context)},
     )
 
 
@@ -244,12 +322,97 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
     context_config = payload.context.get("config") or {}
     config = build_config({**admin_config, **context_config})
     rag_context = payload.context.get("rag_context", "")
-    step = payload.state.get("step", "UNKNOWN")
+    raw_step = payload.state.get("step", "UNKNOWN")
+    resolved_step = normalize_step(raw_step) or ConversationStep.MAIN_MENU
+    step = resolved_step.value
     raw_intent = payload.state.get("intent") or payload.context.get("intent")
     inferred_intent = None if raw_intent else classify_intent(payload.user_message)
     intent = raw_intent or inferred_intent
     source = "payload" if raw_intent else ("inferred" if inferred_intent else "none")
     LOGGER.warning("intent_selected intent=%s source=%s", intent or "unknown", source)
+
+    slots = payload.state.get("slots")
+    if not isinstance(slots, dict):
+        slots = {}
+
+    button_id = payload.state.get("button_id")
+    if not isinstance(button_id, str):
+        button_id = match_button_id(resolved_step, payload.user_message)
+
+    next_step = resolve_next_step(resolved_step, button_id, intent)
+
+    if is_wizard_step(resolved_step) or resolved_step == ConversationStep.BUDGET_CLIENT_TYPE:
+        wizard_payload = handle_step(
+            resolved_step,
+            payload.user_message,
+            button_id,
+            slots,
+        )
+
+        async def wizard_event_stream() -> Any:
+            with get_connection() as conn:
+                result = conn.execute(
+                    "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
+                    (wizard_payload["suggested_next_step"], payload.session_id),
+                )
+                if result.rowcount == 0:
+                    raise HTTPException(status_code=404, detail="Session not found")
+            state_payload = {
+                "step": wizard_payload["suggested_next_step"],
+                "slot_updates": wizard_payload["slot_updates"],
+                "handoff": wizard_payload["handoff"],
+                "safety": wizard_payload["safety"],
+                "suggested_next_step": wizard_payload["suggested_next_step"],
+                "latency_ms": 0,
+            }
+            yield _format_sse(
+                "final",
+                ChatStreamFinal(
+                    assistant_message=wizard_payload["assistant_message"],
+                    state=state_payload,
+                    buttons=[ChatButton(**button) for button in wizard_payload["buttons"]],
+                ).model_dump(),
+            )
+
+        return StreamingResponse(wizard_event_stream(), media_type="text/event-stream")
+
+    if is_wizard_step(next_step):
+        wizard_payload = build_response(
+            resolved_step,
+            build_wizard_prompt(next_step),
+            get_buttons_for_step(next_step),
+            next_step,
+            {},
+            handoff={"requested": False},
+            safety={"rag_used": False},
+        )
+
+        async def wizard_start_stream() -> Any:
+            with get_connection() as conn:
+                result = conn.execute(
+                    "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
+                    (wizard_payload["suggested_next_step"], payload.session_id),
+                )
+                if result.rowcount == 0:
+                    raise HTTPException(status_code=404, detail="Session not found")
+            state_payload = {
+                "step": wizard_payload["suggested_next_step"],
+                "slot_updates": wizard_payload["slot_updates"],
+                "handoff": wizard_payload["handoff"],
+                "safety": wizard_payload["safety"],
+                "suggested_next_step": wizard_payload["suggested_next_step"],
+                "latency_ms": 0,
+            }
+            yield _format_sse(
+                "final",
+                ChatStreamFinal(
+                    assistant_message=wizard_payload["assistant_message"],
+                    state=state_payload,
+                    buttons=[ChatButton(**button) for button in wizard_payload["buttons"]],
+                ).model_dump(),
+            )
+
+        return StreamingResponse(wizard_start_stream(), media_type="text/event-stream")
 
     rag_triggered = should_trigger_rag(intent, payload.user_message)
     LOGGER.warning(
@@ -285,7 +448,7 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
         len(rag_context),
     )
 
-    default_next_step = payload.state.get("step", "MAIN_MENU")
+    default_next_step = next_step.value
 
     messages = build_messages(
         step=step,
@@ -330,6 +493,7 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
                 llm_response,
                 allowed_buttons,
                 default_next_step,
+                text_only=True,
             )
         except (LLMClientError, TimeoutError) as exc:
             llm_error = str(exc)
@@ -343,7 +507,10 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
         if llm_error:
             yield _format_sse("error", {"message": llm_error})
 
-        next_step = validated.get("suggested_next_step", default_next_step)
+        next_step = default_next_step
+        buttons = get_buttons_for_step(resolved_step)
+        if button_id:
+            buttons = get_buttons_for_step(ConversationStep(next_step))
         with get_connection() as conn:
             result = conn.execute(
                 "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
@@ -357,16 +524,16 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
             next_step,
         )
 
-        assistant_message = validated["assistant_message"]
+        assistant_message = normalize_llm_text(validated["assistant_message"])
         for token in _tokenize_message(assistant_message):
             yield _format_sse("token", {"value": token})
 
         state_payload = {
             "step": next_step,
-            "slot_updates": validated["slot_updates"],
-            "handoff": validated["handoff"],
-            "safety": validated["safety"],
-            "suggested_next_step": validated["suggested_next_step"],
+            "slot_updates": {},
+            "handoff": {"requested": False},
+            "safety": {"rag_used": bool(rag_context)},
+            "suggested_next_step": next_step,
             "latency_ms": int((time.monotonic() - llm_start) * 1000),
         }
         yield _format_sse(
@@ -374,7 +541,7 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
             ChatStreamFinal(
                 assistant_message=assistant_message,
                 state=state_payload,
-                buttons=[ChatButton(**button) for button in validated["buttons"]],
+                buttons=[ChatButton(**button) for button in serialize_buttons(buttons)],
             ).model_dump(),
         )
 

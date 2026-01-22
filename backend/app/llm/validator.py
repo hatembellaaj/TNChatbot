@@ -9,6 +9,27 @@ class ValidationError(ValueError):
     """Raised when the LLM response is invalid."""
 
 
+def normalize_llm_text(raw_content: str) -> str:
+    if not raw_content:
+        return ""
+    stripped = raw_content.strip()
+    if not stripped:
+        return ""
+    if stripped.startswith("{"):
+        payload = _parse_llm_payload(stripped)
+        assistant_message = payload.get("assistant_message")
+        if isinstance(assistant_message, str) and assistant_message.strip():
+            return assistant_message.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    return stripped
+
+
 def _parse_llm_payload(raw_content: str) -> Dict[str, Any]:
     try:
         payload = json.loads(raw_content)
@@ -107,7 +128,21 @@ def validate_or_fallback(
     raw_content: str,
     allowed_buttons: List[str],
     default_next_step: str,
+    *,
+    text_only: bool = False,
 ) -> Dict[str, Any]:
+    if text_only:
+        assistant_message = normalize_llm_text(raw_content)
+        if not assistant_message:
+            return build_fallback_response_with_step(default_next_step)
+        return {
+            "assistant_message": assistant_message,
+            "buttons": [],
+            "suggested_next_step": default_next_step,
+            "slot_updates": {},
+            "handoff": {"requested": False},
+            "safety": {"flagged": False},
+        }
     try:
         return normalize_llm_payload(raw_content, allowed_buttons, default_next_step)
     except ValidationError:

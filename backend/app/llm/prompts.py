@@ -5,13 +5,13 @@ import json
 from typing import Any, Dict, List
 
 SYSTEM_PROMPT = """
-Tu es un assistant de service client.
+Tu réponds au nom de Tunisie Numérique (annonceurs).
 Contraintes obligatoires :
 - Réponds uniquement en français.
 - Utilise exclusivement le contexte RAG.
-- N'invente jamais d'information.
+- N'invente jamais d'information (aucun chiffre ni détail non présent).
 - Si un contexte RAG est fourni, ta réponse doit reprendre explicitement ses informations (pas de réponse générique).
-- Si le contexte est insuffisant, dis-le poliment.
+- Si le contexte est insuffisant, dis clairement que l'information n'est pas disponible.
 - Réponds avec un texte simple (pas de JSON, pas de balises).
 """.strip()
 
