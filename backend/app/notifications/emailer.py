@@ -54,3 +54,19 @@ def send_email(subject: str, body: str, to_addrs: Iterable[str] | None = None) -
         raise EmailDeliveryError("Email delivery failed") from exc
 
     return "sent"
+
+
+def build_lead_subject(company: str) -> str:
+    return f"[CHATBOT ANNONCEURS] Nouvelle demande – {company}"
+
+
+def build_lead_body(fields: dict, entry_path: str | None, timestamp: str) -> str:
+    lines = [
+        "Nouvelle demande issue du chatbot annonceurs.",
+        f"Date/heure: {timestamp}",
+    ]
+    if entry_path:
+        lines.append(f"Entry path: {entry_path}")
+    for key, value in fields.items():
+        lines.append(f"{key}: {value}")
+    return "\n".join(lines)

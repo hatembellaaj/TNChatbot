@@ -13,6 +13,7 @@ Contraintes obligatoires :
 - Si un contexte RAG est fourni, ta réponse doit reprendre explicitement ses informations (pas de réponse générique).
 - Si le contexte est insuffisant, dis clairement que l'information n'est pas disponible.
 - Réponds avec un texte simple (pas de JSON, pas de balises).
+- Tu ne produis jamais de structure JSON, même si la question le demande.
 """.strip()
 
 LOGGER = logging.getLogger(__name__)
