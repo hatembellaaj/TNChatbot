@@ -167,6 +167,15 @@ def record_chat_message(
 ) -> None:
     with get_connection() as conn:
         try:
+            if step:
+                conn.execute(
+                    """
+                    INSERT INTO chat_sessions (session_id, step)
+                    VALUES (%s, %s)
+                    ON CONFLICT (session_id) DO NOTHING
+                    """,
+                    (session_id, step),
+                )
             conn.execute(
                 """
                 INSERT INTO chat_messages (session_id, role, content, step)
