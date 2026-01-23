@@ -187,6 +187,23 @@ def record_chat_message(
             raise HTTPException(status_code=404, detail="Session not found") from exc
 
 
+def update_chat_session_step(session_id: str, step: str) -> None:
+    with get_connection() as conn:
+        result = conn.execute(
+            "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
+            (step, session_id),
+        )
+        if result.rowcount == 0:
+            conn.execute(
+                """
+                INSERT INTO chat_sessions (session_id, step)
+                VALUES (%s, %s)
+                ON CONFLICT (session_id) DO UPDATE SET step = EXCLUDED.step
+                """,
+                (session_id, step),
+            )
+
+
 @app.post("/api/chat/message", response_model=ChatMessageResponse)
 def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
     allowed_buttons = payload.context.get("allowed_buttons") or []
@@ -222,13 +239,7 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
             button_id=button_id,
             slots=slots,
         )
-        with get_connection() as conn:
-            result = conn.execute(
-                "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
-                (reader_payload["suggested_next_step"], payload.session_id),
-            )
-            if result.rowcount == 0:
-                raise HTTPException(status_code=404, detail="Session not found")
+        update_chat_session_step(payload.session_id, reader_payload["suggested_next_step"])
         record_chat_message(
             payload.session_id,
             "assistant",
@@ -251,13 +262,7 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
             button_id,
             slots,
         )
-        with get_connection() as conn:
-            result = conn.execute(
-                "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
-                (wizard_payload["suggested_next_step"], payload.session_id),
-            )
-            if result.rowcount == 0:
-                raise HTTPException(status_code=404, detail="Session not found")
+        update_chat_session_step(payload.session_id, wizard_payload["suggested_next_step"])
         record_chat_message(
             payload.session_id,
             "assistant",
@@ -288,13 +293,7 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
             handoff={"requested": False},
             safety={"rag_used": False},
         )
-        with get_connection() as conn:
-            result = conn.execute(
-                "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
-                (wizard_payload["suggested_next_step"], payload.session_id),
-            )
-            if result.rowcount == 0:
-                raise HTTPException(status_code=404, detail="Session not found")
+        update_chat_session_step(payload.session_id, wizard_payload["suggested_next_step"])
         record_chat_message(
             payload.session_id,
             "assistant",
@@ -319,13 +318,7 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
             button_id=button_id,
             slots=slots,
         )
-        with get_connection() as conn:
-            result = conn.execute(
-                "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
-                (static_payload["suggested_next_step"], payload.session_id),
-            )
-            if result.rowcount == 0:
-                raise HTTPException(status_code=404, detail="Session not found")
+        update_chat_session_step(payload.session_id, static_payload["suggested_next_step"])
         record_chat_message(
             payload.session_id,
             "assistant",
@@ -425,13 +418,10 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
         if button_id
         else {}
     )
-    with get_connection() as conn:
-        result = conn.execute(
-            "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
-            (next_step, payload.session_id),
-        )
-        if result.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Session not found")
+    update_chat_session_step(payload.session_id, next_step)
+
+    assistant_message = normalize_llm_text(validated["assistant_message"])
+    record_chat_message(payload.session_id, "assistant", assistant_message, next_step)
 
     assistant_message = normalize_llm_text(validated["assistant_message"])
     record_chat_message(payload.session_id, "assistant", assistant_message, next_step)
@@ -492,13 +482,7 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
         )
 
         async def reader_event_stream() -> Any:
-            with get_connection() as conn:
-                result = conn.execute(
-                    "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
-                    (reader_payload["suggested_next_step"], payload.session_id),
-                )
-                if result.rowcount == 0:
-                    raise HTTPException(status_code=404, detail="Session not found")
+            update_chat_session_step(payload.session_id, reader_payload["suggested_next_step"])
             record_chat_message(
                 payload.session_id,
                 "assistant",
@@ -533,13 +517,7 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
         )
 
         async def wizard_event_stream() -> Any:
-            with get_connection() as conn:
-                result = conn.execute(
-                    "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
-                    (wizard_payload["suggested_next_step"], payload.session_id),
-                )
-                if result.rowcount == 0:
-                    raise HTTPException(status_code=404, detail="Session not found")
+            update_chat_session_step(payload.session_id, wizard_payload["suggested_next_step"])
             record_chat_message(
                 payload.session_id,
                 "assistant",
@@ -582,13 +560,7 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
         )
 
         async def wizard_start_stream() -> Any:
-            with get_connection() as conn:
-                result = conn.execute(
-                    "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
-                    (wizard_payload["suggested_next_step"], payload.session_id),
-                )
-                if result.rowcount == 0:
-                    raise HTTPException(status_code=404, detail="Session not found")
+            update_chat_session_step(payload.session_id, wizard_payload["suggested_next_step"])
             record_chat_message(
                 payload.session_id,
                 "assistant",
@@ -625,13 +597,7 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
         )
 
         async def static_event_stream() -> Any:
-            with get_connection() as conn:
-                result = conn.execute(
-                    "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
-                    (static_payload["suggested_next_step"], payload.session_id),
-                )
-                if result.rowcount == 0:
-                    raise HTTPException(status_code=404, detail="Session not found")
+            update_chat_session_step(payload.session_id, static_payload["suggested_next_step"])
             record_chat_message(
                 payload.session_id,
                 "assistant",
@@ -763,13 +729,7 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
             if button_id
             else {}
         )
-        with get_connection() as conn:
-            result = conn.execute(
-                "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
-                (next_step, payload.session_id),
-            )
-            if result.rowcount == 0:
-                raise HTTPException(status_code=404, detail="Session not found")
+        update_chat_session_step(payload.session_id, next_step)
         LOGGER.info(
             "chat_stream_state_update session_id=%s next_step=%s",
             payload.session_id,
