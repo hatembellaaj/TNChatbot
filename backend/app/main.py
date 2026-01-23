@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from psycopg import errors
 
 from app.admin import load_admin_config, router as admin_router
 from app.db import get_connection
@@ -101,6 +102,18 @@ def initialize_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id BIGSERIAL PRIMARY KEY,
+                session_id UUID NOT NULL REFERENCES chat_sessions(session_id) ON DELETE CASCADE,
+                role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+                content TEXT NOT NULL,
+                step TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS admin_config (
                 key TEXT PRIMARY KEY,
                 value JSONB NOT NULL,
@@ -140,6 +153,25 @@ def create_chat_session() -> ChatSessionCreateResponse:
     return ChatSessionCreateResponse(session_id=str(session_id))
 
 
+def record_chat_message(
+    session_id: str,
+    role: str,
+    content: str,
+    step: str | None,
+) -> None:
+    with get_connection() as conn:
+        try:
+            conn.execute(
+                """
+                INSERT INTO chat_messages (session_id, role, content, step)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (session_id, role, content, step),
+            )
+        except errors.ForeignKeyViolation as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+
+
 @app.post("/api/chat/message", response_model=ChatMessageResponse)
 def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
     allowed_buttons = payload.context.get("allowed_buttons") or []
@@ -156,6 +188,7 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
     intent = raw_intent or inferred_intent
     source = "payload" if raw_intent else ("inferred" if inferred_intent else "none")
     LOGGER.warning("intent_selected intent=%s source=%s", intent or "unknown", source)
+    record_chat_message(payload.session_id, "user", payload.user_message, step)
 
     slots = payload.state.get("slots")
     if not isinstance(slots, dict):
@@ -181,6 +214,12 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
             )
             if result.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Session not found")
+        record_chat_message(
+            payload.session_id,
+            "assistant",
+            reader_payload["assistant_message"],
+            reader_payload["suggested_next_step"],
+        )
         return ChatMessageResponse(
             assistant_message=reader_payload["assistant_message"],
             buttons=[ChatButton(**button) for button in reader_payload["buttons"]],
@@ -204,6 +243,12 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
             )
             if result.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Session not found")
+        record_chat_message(
+            payload.session_id,
+            "assistant",
+            wizard_payload["assistant_message"],
+            wizard_payload["suggested_next_step"],
+        )
         return ChatMessageResponse(
             assistant_message=wizard_payload["assistant_message"],
             buttons=[ChatButton(**button) for button in wizard_payload["buttons"]],
@@ -235,6 +280,12 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
             )
             if result.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Session not found")
+        record_chat_message(
+            payload.session_id,
+            "assistant",
+            wizard_payload["assistant_message"],
+            wizard_payload["suggested_next_step"],
+        )
         return ChatMessageResponse(
             assistant_message=wizard_payload["assistant_message"],
             buttons=[ChatButton(**button) for button in wizard_payload["buttons"]],
@@ -260,6 +311,12 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
             )
             if result.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Session not found")
+        record_chat_message(
+            payload.session_id,
+            "assistant",
+            static_payload["assistant_message"],
+            static_payload["suggested_next_step"],
+        )
         return ChatMessageResponse(
             assistant_message=static_payload["assistant_message"],
             buttons=[ChatButton(**button) for button in static_payload["buttons"]],
@@ -361,8 +418,11 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="Session not found")
 
+    assistant_message = normalize_llm_text(validated["assistant_message"])
+    record_chat_message(payload.session_id, "assistant", assistant_message, next_step)
+
     return ChatMessageResponse(
-        assistant_message=normalize_llm_text(validated["assistant_message"]),
+        assistant_message=assistant_message,
         buttons=[ChatButton(**button) for button in serialize_buttons(buttons)],
         suggested_next_step=next_step,
         slot_updates=slot_updates,
@@ -396,6 +456,7 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
     intent = raw_intent or inferred_intent
     source = "payload" if raw_intent else ("inferred" if inferred_intent else "none")
     LOGGER.warning("intent_selected intent=%s source=%s", intent or "unknown", source)
+    record_chat_message(payload.session_id, "user", payload.user_message, step)
 
     slots = payload.state.get("slots")
     if not isinstance(slots, dict):
@@ -423,6 +484,12 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
                 )
                 if result.rowcount == 0:
                     raise HTTPException(status_code=404, detail="Session not found")
+            record_chat_message(
+                payload.session_id,
+                "assistant",
+                reader_payload["assistant_message"],
+                reader_payload["suggested_next_step"],
+            )
             state_payload = {
                 "step": reader_payload["suggested_next_step"],
                 "slot_updates": reader_payload["slot_updates"],
@@ -458,6 +525,12 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
                 )
                 if result.rowcount == 0:
                     raise HTTPException(status_code=404, detail="Session not found")
+            record_chat_message(
+                payload.session_id,
+                "assistant",
+                wizard_payload["assistant_message"],
+                wizard_payload["suggested_next_step"],
+            )
             state_payload = {
                 "step": wizard_payload["suggested_next_step"],
                 "slot_updates": wizard_payload["slot_updates"],
@@ -501,6 +574,12 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
                 )
                 if result.rowcount == 0:
                     raise HTTPException(status_code=404, detail="Session not found")
+            record_chat_message(
+                payload.session_id,
+                "assistant",
+                wizard_payload["assistant_message"],
+                wizard_payload["suggested_next_step"],
+            )
             state_payload = {
                 "step": wizard_payload["suggested_next_step"],
                 "slot_updates": wizard_payload["slot_updates"],
@@ -538,6 +617,12 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
                 )
                 if result.rowcount == 0:
                     raise HTTPException(status_code=404, detail="Session not found")
+            record_chat_message(
+                payload.session_id,
+                "assistant",
+                static_payload["assistant_message"],
+                static_payload["suggested_next_step"],
+            )
             state_payload = {
                 "step": static_payload["suggested_next_step"],
                 "slot_updates": static_payload["slot_updates"],
@@ -677,6 +762,7 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
         )
 
         assistant_message = normalize_llm_text(validated["assistant_message"])
+        record_chat_message(payload.session_id, "assistant", assistant_message, next_step)
         for token in _tokenize_message(assistant_message):
             yield _format_sse("token", {"value": token})
 

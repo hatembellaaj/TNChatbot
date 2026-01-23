@@ -183,3 +183,79 @@ def get_leads(format: str | None = Query(default=None)) -> Any:
         return StreamingResponse(buffer, media_type="text/csv", headers=headers)
 
     return {"count": len(leads), "items": leads}
+
+
+@router.get("/api/admin/overview")
+def get_overview() -> Dict[str, Any]:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM chat_sessions")
+            sessions_count = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM chat_messages")
+            messages_count = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM leads")
+            leads_count = cur.fetchone()[0]
+
+    return {
+        "sessions": sessions_count,
+        "messages": messages_count,
+        "leads": leads_count,
+    }
+
+
+@router.get("/api/admin/conversations")
+def get_conversations(
+    limit: int = Query(default=20, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> Dict[str, Any]:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM chat_sessions")
+            total = cur.fetchone()[0]
+            cur.execute(
+                """
+                SELECT session_id, step, created_at
+                FROM chat_sessions
+                ORDER BY created_at DESC
+                LIMIT %s OFFSET %s
+                """,
+                (limit, offset),
+            )
+            sessions = cur.fetchall()
+
+            session_ids = [row[0] for row in sessions]
+            messages_by_session: Dict[str, List[Dict[str, Any]]] = {
+                str(session_id): [] for session_id in session_ids
+            }
+            if session_ids:
+                cur.execute(
+                    """
+                    SELECT session_id, role, content, step, created_at
+                    FROM chat_messages
+                    WHERE session_id = ANY(%s)
+                    ORDER BY created_at ASC
+                    """,
+                    (session_ids,),
+                )
+                for session_id, role, content, step, created_at in cur.fetchall():
+                    messages_by_session[str(session_id)].append(
+                        {
+                            "role": role,
+                            "content": content,
+                            "step": step,
+                            "created_at": created_at.isoformat()
+                            if created_at
+                            else None,
+                        }
+                    )
+
+    items = [
+        {
+            "session_id": str(session_id),
+            "step": step,
+            "created_at": created_at.isoformat() if created_at else None,
+            "messages": messages_by_session.get(str(session_id), []),
+        }
+        for session_id, step, created_at in sessions
+    ]
+    return {"total": total, "count": len(items), "items": items}
