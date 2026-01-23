@@ -114,6 +114,12 @@ def initialize_db() -> None:
         )
         conn.execute(
             """
+            ALTER TABLE chat_messages
+            ADD COLUMN IF NOT EXISTS step TEXT
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS admin_config (
                 key TEXT PRIMARY KEY,
                 value JSONB NOT NULL,

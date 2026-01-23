@@ -9,6 +9,9 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE chat_messages
+    ADD COLUMN IF NOT EXISTS step TEXT;
+
 CREATE INDEX IF NOT EXISTS chat_messages_session_id_created_at_idx
     ON chat_messages (session_id, created_at);
 
