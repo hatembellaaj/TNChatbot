@@ -423,6 +423,9 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
     assistant_message = normalize_llm_text(validated["assistant_message"])
     record_chat_message(payload.session_id, "assistant", assistant_message, next_step)
 
+    assistant_message = normalize_llm_text(validated["assistant_message"])
+    record_chat_message(payload.session_id, "assistant", assistant_message, next_step)
+
     return ChatMessageResponse(
         assistant_message=assistant_message,
         buttons=[ChatButton(**button) for button in serialize_buttons(buttons)],
