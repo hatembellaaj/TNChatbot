@@ -183,8 +183,23 @@ def record_chat_message(
                 """,
                 (session_id, role, content, step),
             )
-        except errors.ForeignKeyViolation as exc:
-            raise HTTPException(status_code=404, detail="Session not found") from exc
+        except errors.ForeignKeyViolation:
+            fallback_step = step or ConversationStep.MAIN_MENU.value
+            conn.execute(
+                """
+                INSERT INTO chat_sessions (session_id, step)
+                VALUES (%s, %s)
+                ON CONFLICT (session_id) DO UPDATE SET step = EXCLUDED.step
+                """,
+                (session_id, fallback_step),
+            )
+            conn.execute(
+                """
+                INSERT INTO chat_messages (session_id, role, content, step)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (session_id, role, content, step),
+            )
 
 
 def update_chat_session_step(session_id: str, step: str) -> None:
@@ -419,9 +434,6 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
         else {}
     )
     update_chat_session_step(payload.session_id, next_step)
-
-    assistant_message = normalize_llm_text(validated["assistant_message"])
-    record_chat_message(payload.session_id, "assistant", assistant_message, next_step)
 
     assistant_message = normalize_llm_text(validated["assistant_message"])
     record_chat_message(payload.session_id, "assistant", assistant_message, next_step)
