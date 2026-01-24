@@ -49,6 +49,7 @@ from app.rag.retrieve import (
 app = FastAPI(title="TNChatbot API")
 LOGGER = logging.getLogger(__name__)
 PING_INTERVAL_SECONDS = 15
+CHAT_SESSIONS_HAS_ID = False
 
 app.add_middleware(
     CORSMiddleware,
@@ -90,6 +91,7 @@ class ChatStreamFinal(BaseModel):
 
 
 def initialize_db() -> None:
+    global CHAT_SESSIONS_HAS_ID
     with get_connection() as conn:
         conn.execute(
             """
@@ -128,6 +130,70 @@ def initialize_db() -> None:
             """
         )
 
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'chat_sessions' AND column_name = 'id'
+                """
+            )
+            CHAT_SESSIONS_HAS_ID = cur.fetchone() is not None
+        if CHAT_SESSIONS_HAS_ID:
+            LOGGER.warning(
+                "chat_sessions.id detected; enabling compatibility inserts for legacy FK schemas"
+            )
+
+
+def _ensure_chat_session_row(conn, session_id: str, step: str, update_step: bool) -> None:
+    session_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
+    if CHAT_SESSIONS_HAS_ID:
+        conn.execute(
+            """
+            INSERT INTO chat_sessions (id, session_id, step)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (session_id) DO NOTHING
+            """,
+            (session_uuid, session_uuid, step),
+        )
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM chat_sessions WHERE session_id = %s",
+                (session_uuid,),
+            )
+            row = cur.fetchone()
+            if row and row[0] != session_uuid:
+                cur.execute("DELETE FROM chat_messages WHERE session_id = %s", (row[0],))
+                cur.execute(
+                    "UPDATE chat_sessions SET id = %s WHERE session_id = %s",
+                    (session_uuid, session_uuid),
+                )
+        if update_step:
+            conn.execute(
+                "UPDATE chat_sessions SET step = %s WHERE session_id = %s",
+                (step, session_uuid),
+            )
+        return
+
+    if update_step:
+        conn.execute(
+            """
+            INSERT INTO chat_sessions (session_id, step)
+            VALUES (%s, %s)
+            ON CONFLICT (session_id) DO UPDATE SET step = EXCLUDED.step
+            """,
+            (session_uuid, step),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO chat_sessions (session_id, step)
+            VALUES (%s, %s)
+            ON CONFLICT (session_id) DO NOTHING
+            """,
+            (session_uuid, step),
+        )
+
 
 @app.on_event("startup")
 def on_startup() -> None:
@@ -152,22 +218,22 @@ def root() -> dict:
 def create_chat_session() -> ChatSessionCreateResponse:
     session_id = uuid.uuid4()
     with get_connection() as conn:
-        conn.execute(
-            "INSERT INTO chat_sessions (session_id, step) VALUES (%s, %s)",
-            (session_id, ConversationStep.WELCOME_SCOPE.value),
+        _ensure_chat_session_row(
+            conn,
+            str(session_id),
+            ConversationStep.WELCOME_SCOPE.value,
+            update_step=True,
         )
     return ChatSessionCreateResponse(session_id=str(session_id))
 
 
 def record_chat_message(session_id: str, role: str, content: str, step: str | None) -> None:
     with get_connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO chat_sessions (session_id, step)
-            VALUES (%s, %s)
-            ON CONFLICT (session_id) DO NOTHING
-            """,
-            (session_id, step or ConversationStep.MAIN_MENU.value),
+        _ensure_chat_session_row(
+            conn,
+            session_id,
+            step or ConversationStep.MAIN_MENU.value,
+            update_step=False,
         )
 
         conn.execute(
@@ -186,14 +252,7 @@ def update_chat_session_step(session_id: str, step: str) -> None:
             (step, session_id),
         )
         if result.rowcount == 0:
-            conn.execute(
-                """
-                INSERT INTO chat_sessions (session_id, step)
-                VALUES (%s, %s)
-                ON CONFLICT (session_id) DO UPDATE SET step = EXCLUDED.step
-                """,
-                (session_id, step),
-            )
+            _ensure_chat_session_row(conn, session_id, step, update_step=True)
 
 
 @app.post("/api/chat/message", response_model=ChatMessageResponse)
