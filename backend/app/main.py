@@ -50,6 +50,8 @@ app = FastAPI(title="TNChatbot API")
 LOGGER = logging.getLogger(__name__)
 PING_INTERVAL_SECONDS = 15
 CHAT_SESSIONS_HAS_ID = False
+CHAT_SESSIONS_HAS_SESSION_ID = True
+CHAT_MESSAGES_FK_TARGET = "session_id"
 
 app.add_middleware(
     CORSMiddleware,
@@ -91,7 +93,7 @@ class ChatStreamFinal(BaseModel):
 
 
 def initialize_db() -> None:
-    global CHAT_SESSIONS_HAS_ID
+    global CHAT_MESSAGES_FK_TARGET, CHAT_SESSIONS_HAS_ID, CHAT_SESSIONS_HAS_SESSION_ID
     with get_connection() as conn:
         conn.execute(
             """
@@ -139,14 +141,83 @@ def initialize_db() -> None:
                 """
             )
             CHAT_SESSIONS_HAS_ID = cur.fetchone() is not None
+            cur.execute(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'chat_sessions' AND column_name = 'session_id'
+                """
+            )
+            CHAT_SESSIONS_HAS_SESSION_ID = cur.fetchone() is not None
+            cur.execute(
+                """
+                SELECT ccu.column_name
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu
+                  ON tc.constraint_name = kcu.constraint_name
+                 AND tc.constraint_schema = kcu.constraint_schema
+                JOIN information_schema.constraint_column_usage ccu
+                  ON tc.constraint_name = ccu.constraint_name
+                 AND tc.constraint_schema = ccu.constraint_schema
+                WHERE tc.constraint_type = 'FOREIGN KEY'
+                  AND tc.table_name = 'chat_messages'
+                  AND kcu.column_name = 'session_id'
+                  AND ccu.table_name = 'chat_sessions'
+                LIMIT 1
+                """
+            )
+            fk_row = cur.fetchone()
+            if fk_row and fk_row[0] in {"id", "session_id"}:
+                CHAT_MESSAGES_FK_TARGET = fk_row[0]
+            else:
+                CHAT_MESSAGES_FK_TARGET = "session_id"
         if CHAT_SESSIONS_HAS_ID:
             LOGGER.warning(
                 "chat_sessions.id detected; enabling compatibility inserts for legacy FK schemas"
+            )
+        if CHAT_MESSAGES_FK_TARGET == "id":
+            LOGGER.warning(
+                "chat_messages.session_id references chat_sessions.id; using legacy FK compatibility"
             )
 
 
 def _ensure_chat_session_row(conn, session_id: str, step: str, update_step: bool) -> None:
     session_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
+    if CHAT_MESSAGES_FK_TARGET == "id" and CHAT_SESSIONS_HAS_ID:
+        if CHAT_SESSIONS_HAS_SESSION_ID:
+            conn.execute(
+                """
+                INSERT INTO chat_sessions (id, session_id, step)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (id) DO UPDATE
+                SET session_id = EXCLUDED.session_id,
+                    step = CASE WHEN %s THEN EXCLUDED.step ELSE chat_sessions.step END
+                """,
+                (session_uuid, session_uuid, step, update_step),
+            )
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id FROM chat_sessions WHERE session_id = %s",
+                    (session_uuid,),
+                )
+                row = cur.fetchone()
+                if row and row[0] != session_uuid:
+                    cur.execute("DELETE FROM chat_messages WHERE session_id = %s", (row[0],))
+                    cur.execute(
+                        "UPDATE chat_sessions SET id = %s WHERE session_id = %s",
+                        (session_uuid, session_uuid),
+                    )
+        else:
+            conn.execute(
+                """
+                INSERT INTO chat_sessions (id, step)
+                VALUES (%s, %s)
+                ON CONFLICT (id) DO UPDATE
+                SET step = CASE WHEN %s THEN EXCLUDED.step ELSE chat_sessions.step END
+                """,
+                (session_uuid, step, update_step),
+            )
+        return
     if CHAT_SESSIONS_HAS_ID:
         conn.execute(
             """
