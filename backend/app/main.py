@@ -159,47 +159,24 @@ def create_chat_session() -> ChatSessionCreateResponse:
     return ChatSessionCreateResponse(session_id=str(session_id))
 
 
-def record_chat_message(
-    session_id: str,
-    role: str,
-    content: str,
-    step: str | None,
-) -> None:
+def record_chat_message(session_id: str, role: str, content: str, step: str | None) -> None:
     with get_connection() as conn:
-        try:
-            if step:
-                conn.execute(
-                    """
-                    INSERT INTO chat_sessions (session_id, step)
-                    VALUES (%s, %s)
-                    ON CONFLICT (session_id) DO NOTHING
-                    """,
-                    (session_id, step),
-                )
-            conn.execute(
-                """
-                INSERT INTO chat_messages (session_id, role, content, step)
-                VALUES (%s, %s, %s, %s)
-                """,
-                (session_id, role, content, step),
-            )
-        except errors.ForeignKeyViolation:
-            fallback_step = step or ConversationStep.MAIN_MENU.value
-            conn.execute(
-                """
-                INSERT INTO chat_sessions (session_id, step)
-                VALUES (%s, %s)
-                ON CONFLICT (session_id) DO UPDATE SET step = EXCLUDED.step
-                """,
-                (session_id, fallback_step),
-            )
-            conn.execute(
-                """
-                INSERT INTO chat_messages (session_id, role, content, step)
-                VALUES (%s, %s, %s, %s)
-                """,
-                (session_id, role, content, step),
-            )
+        conn.execute(
+            """
+            INSERT INTO chat_sessions (session_id, step)
+            VALUES (%s, %s)
+            ON CONFLICT (session_id) DO NOTHING
+            """,
+            (session_id, step or ConversationStep.MAIN_MENU.value),
+        )
+
+        conn.execute(
+            """
+            INSERT INTO chat_messages (session_id, role, content, step)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (session_id, role, content, step),
+        )
 
 
 def update_chat_session_step(session_id: str, step: str) -> None:
