@@ -12,29 +12,33 @@ from app.db import get_connection
 ADMIN_CONFIG_KEYS = ("audience_metrics", "offers_copy", "email_config", "sectors")
 
 
-def _extract_admin_token(
-    authorization: str | None, x_admin_token: str | None
-) -> str | None:
-    if authorization:
-        parts = authorization.split()
-        if len(parts) == 2 and parts[0].lower() == "bearer":
-            return parts[1]
-    return x_admin_token
-
-
-def require_admin_token(
-    authorization: str | None = Header(None),
-    x_admin_token: str | None = Header(None),
-) -> None:
-    expected = os.getenv("ADMIN_API_TOKEN")
+def _get_admin_password() -> str:
+    expected = os.getenv("ADMIN_PASSWORD")
     if not expected:
-        raise HTTPException(status_code=500, detail="ADMIN_API_TOKEN not configured")
-    token = _extract_admin_token(authorization, x_admin_token)
-    if token != expected:
-        raise HTTPException(status_code=401, detail="Invalid admin token")
+        raise HTTPException(status_code=500, detail="ADMIN_PASSWORD not configured")
+    return expected
 
 
-router = APIRouter(dependencies=[Depends(require_admin_token)])
+def _ensure_admin_password(password: str | None) -> None:
+    expected = _get_admin_password()
+    if not password or password != expected:
+        raise HTTPException(status_code=401, detail="Invalid admin password")
+
+
+def require_admin_password(
+    x_admin_password: str | None = Header(None),
+) -> None:
+    _ensure_admin_password(x_admin_password)
+
+
+auth_router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_admin_password)])
+
+
+@auth_router.post("/api/admin/login")
+def login_admin(payload: Dict[str, str] = Body(...)) -> Dict[str, bool]:
+    _ensure_admin_password(payload.get("password"))
+    return {"ok": True}
 
 
 def load_admin_config(keys: Iterable[str] = ADMIN_CONFIG_KEYS) -> Dict[str, Any]:

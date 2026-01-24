@@ -65,7 +65,8 @@ type Lead = {
 export default function AdminPage() {
   const apiCandidates = useMemo(() => resolveApiBases(), []);
   const [apiBase, setApiBase] = useState<string | null>(null);
-  const [token, setToken] = useState("");
+  const [password, setPassword] = useState("");
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -96,33 +97,71 @@ export default function AdminPage() {
     void discover();
   }, [apiCandidates]);
 
-  const loadData = async () => {
-    if (!apiBase || !token) {
+  const fetchAdminData = async () => {
+    if (!apiBase || !password) {
+      throw new Error(
+        "Impossible de charger les données sans mot de passe admin.",
+      );
+    }
+    const headers = { "X-Admin-Password": password };
+    const [overviewRes, conversationsRes, leadsRes] = await Promise.all([
+      fetch(`${apiBase}/api/admin/overview`, { headers }),
+      fetch(`${apiBase}/api/admin/conversations`, { headers }),
+      fetch(`${apiBase}/api/admin/leads`, { headers }),
+    ]);
+
+    if (!overviewRes.ok || !conversationsRes.ok || !leadsRes.ok) {
+      throw new Error("Impossible de charger les données administratives.");
+    }
+
+    const overviewPayload = (await overviewRes.json()) as OverviewPayload;
+    const conversationsPayload = (await conversationsRes.json()) as {
+      items: Conversation[];
+    };
+    const leadsPayload = (await leadsRes.json()) as { items: Lead[] };
+
+    setOverview(overviewPayload);
+    setConversations(conversationsPayload.items ?? []);
+    setLeads(leadsPayload.items ?? []);
+  };
+
+  const handleLogin = async () => {
+    if (!apiBase || !password) {
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const headers = { "X-Admin-Token": token };
-      const [overviewRes, conversationsRes, leadsRes] = await Promise.all([
-        fetch(`${apiBase}/api/admin/overview`, { headers }),
-        fetch(`${apiBase}/api/admin/conversations`, { headers }),
-        fetch(`${apiBase}/api/admin/leads`, { headers }),
-      ]);
-
-      if (!overviewRes.ok || !conversationsRes.ok || !leadsRes.ok) {
-        throw new Error("Impossible de charger les données administratives.");
+      const response = await fetch(`${apiBase}/api/admin/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      if (!response.ok) {
+        throw new Error("Mot de passe admin invalide.");
       }
+      setIsAuthenticated(true);
+      await fetchAdminData();
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Erreur inconnue lors de la connexion.";
+      setError(message);
+      setIsAuthenticated(false);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      const overviewPayload = (await overviewRes.json()) as OverviewPayload;
-      const conversationsPayload = (await conversationsRes.json()) as {
-        items: Conversation[];
-      };
-      const leadsPayload = (await leadsRes.json()) as { items: Lead[] };
-
-      setOverview(overviewPayload);
-      setConversations(conversationsPayload.items ?? []);
-      setLeads(leadsPayload.items ?? []);
+  const refreshData = async () => {
+    if (!isAuthenticated) {
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      await fetchAdminData();
     } catch (err) {
       const message =
         err instanceof Error
@@ -143,21 +182,25 @@ export default function AdminPage() {
         </div>
         <div className={styles.actions}>
           <label className={styles.tokenField}>
-            <span>Jeton admin</span>
+            <span>Mot de passe admin</span>
             <input
               type="password"
-              value={token}
-              onChange={(event) => setToken(event.target.value)}
-              placeholder="ADMIN_API_TOKEN"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="ADMIN_PASSWORD"
             />
           </label>
           <button
             type="button"
             className={styles.primaryButton}
-            onClick={loadData}
-            disabled={!apiBase || !token || loading}
+            onClick={isAuthenticated ? refreshData : handleLogin}
+            disabled={!apiBase || !password || loading}
           >
-            {loading ? "Chargement..." : "Rafraîchir"}
+            {loading
+              ? "Chargement..."
+              : isAuthenticated
+                ? "Rafraîchir"
+                : "Se connecter"}
           </button>
         </div>
       </header>
