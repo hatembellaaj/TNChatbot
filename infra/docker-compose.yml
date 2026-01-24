@@ -33,6 +33,7 @@ services:
       SMTP_FROM: ${SMTP_FROM:-no-reply@example.com}
       SMTP_TO: ${SMTP_TO:-ops@example.com}
       EXPORT_MODE: ${EXPORT_MODE:-NONE}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change_me}
     ports:
       - "${BACKEND_PORT:-19081}:8000"
     volumes:
