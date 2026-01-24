@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from psycopg import errors
 
-from app.admin import load_admin_config, router as admin_router
+from app.admin import auth_router, load_admin_config, router as admin_router
 from app.db import get_connection
 from app.leads import router as leads_router
 from app.llm.client import LLMClientError, call_llm
@@ -272,6 +272,7 @@ def on_startup() -> None:
 
 
 app.include_router(leads_router)
+app.include_router(auth_router)
 app.include_router(admin_router)
 
 
