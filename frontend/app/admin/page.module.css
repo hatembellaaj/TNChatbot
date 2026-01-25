@@ -202,6 +202,79 @@
   border-top: 1px solid #eef0f8;
 }
 
+.kbGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.kbHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.kbHeader h3 {
+  margin: 0;
+}
+
+.kbList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.kbItem {
+  border: 1px solid #eef0f8;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fafbff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kbMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  color: #5c5f7a;
+}
+
+.chunkFilters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.chunkFilters label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.chunkFilters input,
+.chunkFilters select {
+  border-radius: 8px;
+  border: 1px solid #d5d7e5;
+  padding: 8px 10px;
+  background: #fff;
+}
+
+.chunkContent {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #1d1d1f;
+}
+
 @media (max-width: 900px) {
   .tableHeader,
   .tableRow {
