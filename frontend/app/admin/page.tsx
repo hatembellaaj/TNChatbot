@@ -34,6 +34,8 @@ type OverviewPayload = {
   sessions: number;
   messages: number;
   leads: number;
+  kb_documents?: number;
+  kb_chunks?: number;
 };
 
 type ConversationMessage = {
@@ -62,6 +64,28 @@ type Lead = {
   created_at: string | null;
 };
 
+type KbDocument = {
+  id: string;
+  source_type: string;
+  source_uri: string | null;
+  title: string | null;
+  status: string;
+  created_at: string | null;
+  updated_at: string | null;
+  chunk_count: number;
+};
+
+type KbChunk = {
+  id: string;
+  document_id: string;
+  chunk_index: number;
+  content: string;
+  token_count: number | null;
+  created_at: string | null;
+  title: string | null;
+  source_uri: string | null;
+};
+
 export default function AdminPage() {
   const apiCandidates = useMemo(() => resolveApiBases(), []);
   const [apiBase, setApiBase] = useState<string | null>(null);
@@ -70,6 +94,10 @@ export default function AdminPage() {
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [kbDocuments, setKbDocuments] = useState<KbDocument[]>([]);
+  const [kbChunks, setKbChunks] = useState<KbChunk[]>([]);
+  const [kbQuery, setKbQuery] = useState("");
+  const [kbDocumentFilter, setKbDocumentFilter] = useState("all");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -104,13 +132,22 @@ export default function AdminPage() {
       );
     }
     const headers = { "X-Admin-Password": password };
-    const [overviewRes, conversationsRes, leadsRes] = await Promise.all([
+    const [overviewRes, conversationsRes, leadsRes, kbDocsRes, kbChunksRes] =
+      await Promise.all([
       fetch(`${apiBase}/api/admin/overview`, { headers }),
       fetch(`${apiBase}/api/admin/conversations`, { headers }),
       fetch(`${apiBase}/api/admin/leads`, { headers }),
-    ]);
+        fetch(`${apiBase}/api/admin/kb/documents`, { headers }),
+        fetch(`${apiBase}/api/admin/kb/chunks`, { headers }),
+      ]);
 
-    if (!overviewRes.ok || !conversationsRes.ok || !leadsRes.ok) {
+    if (
+      !overviewRes.ok ||
+      !conversationsRes.ok ||
+      !leadsRes.ok ||
+      !kbDocsRes.ok ||
+      !kbChunksRes.ok
+    ) {
       throw new Error("Impossible de charger les données administratives.");
     }
 
@@ -119,10 +156,49 @@ export default function AdminPage() {
       items: Conversation[];
     };
     const leadsPayload = (await leadsRes.json()) as { items: Lead[] };
+    const kbDocsPayload = (await kbDocsRes.json()) as { items: KbDocument[] };
+    const kbChunksPayload = (await kbChunksRes.json()) as { items: KbChunk[] };
 
     setOverview(overviewPayload);
     setConversations(conversationsPayload.items ?? []);
     setLeads(leadsPayload.items ?? []);
+    setKbDocuments(kbDocsPayload.items ?? []);
+    setKbChunks(kbChunksPayload.items ?? []);
+  };
+
+  const fetchKbChunks = async () => {
+    if (!apiBase || !password) {
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const headers = { "X-Admin-Password": password };
+      const searchParams = new URLSearchParams();
+      if (kbDocumentFilter !== "all") {
+        searchParams.set("document_id", kbDocumentFilter);
+      }
+      if (kbQuery.trim()) {
+        searchParams.set("query", kbQuery.trim());
+      }
+      const response = await fetch(
+        `${apiBase}/api/admin/kb/chunks?${searchParams.toString()}`,
+        { headers },
+      );
+      if (!response.ok) {
+        throw new Error("Impossible de charger les chunks.");
+      }
+      const payload = (await response.json()) as { items: KbChunk[] };
+      setKbChunks(payload.items ?? []);
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Erreur inconnue lors du chargement des chunks.";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleLogin = async () => {
@@ -220,6 +296,14 @@ export default function AdminPage() {
           <p>Fiches de contact</p>
           <strong>{overview?.leads ?? "—"}</strong>
         </article>
+        <article className={styles.card}>
+          <p>Documents KB</p>
+          <strong>{overview?.kb_documents ?? "—"}</strong>
+        </article>
+        <article className={styles.card}>
+          <p>Chunks KB</p>
+          <strong>{overview?.kb_chunks ?? "—"}</strong>
+        </article>
       </section>
 
       <section className={styles.section}>
@@ -304,6 +388,124 @@ export default function AdminPage() {
               </div>
             ))
           )}
+        </div>
+      </section>
+
+      <section className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <h2>Base de connaissances</h2>
+          <span>
+            {kbDocuments.length} documents · {kbChunks.length} chunks
+          </span>
+        </div>
+        <div className={styles.kbGrid}>
+          <article className={styles.card}>
+            <header className={styles.kbHeader}>
+              <h3>Documents ingérés</h3>
+              <span>Dernières mises à jour</span>
+            </header>
+            <ul className={styles.kbList}>
+              {kbDocuments.length === 0 ? (
+                <li className={styles.emptyState}>
+                  Aucun document n'a encore été ingéré.
+                </li>
+              ) : (
+                kbDocuments.map((doc) => (
+                  <li key={doc.id} className={styles.kbItem}>
+                    <div>
+                      <strong>{doc.title ?? "Sans titre"}</strong>
+                      <p className={styles.kbMeta}>
+                        {doc.source_type} ·{" "}
+                        {doc.source_uri ?? "Source inconnue"}
+                      </p>
+                    </div>
+                    <div className={styles.kbMeta}>
+                      <span>{doc.chunk_count} chunks</span>
+                      <span>
+                        {doc.updated_at
+                          ? new Date(doc.updated_at).toLocaleString("fr-FR")
+                          : "Date inconnue"}
+                      </span>
+                      <span>Statut : {doc.status}</span>
+                    </div>
+                  </li>
+                ))
+              )}
+            </ul>
+          </article>
+          <article className={styles.card}>
+            <header className={styles.kbHeader}>
+              <h3>Chunks disponibles</h3>
+              <span>Recherche rapide</span>
+            </header>
+            <div className={styles.chunkFilters}>
+              <label>
+                <span>Document</span>
+                <select
+                  value={kbDocumentFilter}
+                  onChange={(event) => setKbDocumentFilter(event.target.value)}
+                >
+                  <option value="all">Tous les documents</option>
+                  {kbDocuments.map((doc) => (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.title ?? doc.id.slice(0, 8)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Recherche</span>
+                <input
+                  type="text"
+                  value={kbQuery}
+                  onChange={(event) => setKbQuery(event.target.value)}
+                  placeholder="Tapez un mot-clé"
+                />
+              </label>
+              <button
+                type="button"
+                className={styles.primaryButton}
+                onClick={fetchKbChunks}
+                disabled={!isAuthenticated || loading}
+              >
+                Filtrer
+              </button>
+            </div>
+            <ul className={styles.kbList}>
+              {kbChunks.length === 0 ? (
+                <li className={styles.emptyState}>
+                  Aucun chunk disponible pour les filtres actuels.
+                </li>
+              ) : (
+                kbChunks.map((chunk) => (
+                  <li key={chunk.id} className={styles.kbItem}>
+                    <div>
+                      <strong>
+                        {chunk.title ?? "Document sans titre"} · Chunk{" "}
+                        {chunk.chunk_index + 1}
+                      </strong>
+                      <p className={styles.kbMeta}>
+                        {chunk.source_uri ?? "Source inconnue"}
+                      </p>
+                    </div>
+                    <p className={styles.chunkContent}>{chunk.content}</p>
+                    <div className={styles.kbMeta}>
+                      <span>
+                        {chunk.token_count
+                          ? `${chunk.token_count} tokens`
+                          : "Tokens inconnus"}
+                      </span>
+                      <span>
+                        {chunk.created_at
+                          ? new Date(chunk.created_at).toLocaleString("fr-FR")
+                          : "Date inconnue"}
+                      </span>
+                    </div>
+                  </li>
+                ))
+              )}
+            </ul>
+          </article>
         </div>
       </section>
     </main>

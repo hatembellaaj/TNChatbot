@@ -199,11 +199,17 @@ def get_overview() -> Dict[str, Any]:
             messages_count = cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) FROM leads")
             leads_count = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM kb_documents")
+            kb_documents_count = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM kb_chunks")
+            kb_chunks_count = cur.fetchone()[0]
 
     return {
         "sessions": sessions_count,
         "messages": messages_count,
         "leads": leads_count,
+        "kb_documents": kb_documents_count,
+        "kb_chunks": kb_chunks_count,
     }
 
 
@@ -262,4 +268,120 @@ def get_conversations(
         }
         for session_id, step, created_at in sessions
     ]
+    return {"total": total, "count": len(items), "items": items}
+
+
+@router.get("/api/admin/kb/documents")
+def get_kb_documents(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> Dict[str, Any]:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM kb_documents")
+            total = cur.fetchone()[0]
+            cur.execute(
+                """
+                SELECT d.id, d.source_type, d.source_uri, d.title, d.status,
+                       d.created_at, d.updated_at, COUNT(c.id) AS chunk_count
+                FROM kb_documents d
+                LEFT JOIN kb_chunks c ON c.document_id = d.id
+                GROUP BY d.id
+                ORDER BY d.updated_at DESC
+                LIMIT %s OFFSET %s
+                """,
+                (limit, offset),
+            )
+            rows = cur.fetchall()
+
+    items = []
+    for (
+        document_id,
+        source_type,
+        source_uri,
+        title,
+        status,
+        created_at,
+        updated_at,
+        chunk_count,
+    ) in rows:
+        items.append(
+            {
+                "id": str(document_id),
+                "source_type": source_type,
+                "source_uri": source_uri,
+                "title": title,
+                "status": status,
+                "created_at": created_at.isoformat() if created_at else None,
+                "updated_at": updated_at.isoformat() if updated_at else None,
+                "chunk_count": chunk_count,
+            }
+        )
+
+    return {"total": total, "count": len(items), "items": items}
+
+
+@router.get("/api/admin/kb/chunks")
+def get_kb_chunks(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    document_id: str | None = Query(default=None),
+    query: str | None = Query(default=None),
+) -> Dict[str, Any]:
+    filters: List[str] = []
+    params: List[Any] = []
+    if document_id:
+        filters.append("c.document_id = %s")
+        params.append(document_id)
+    if query:
+        filters.append("c.content ILIKE %s")
+        params.append(f"%{query}%")
+
+    where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT COUNT(*) FROM kb_chunks c {where_clause}",
+                tuple(params),
+            )
+            total = cur.fetchone()[0]
+            params_with_paging = params + [limit, offset]
+            cur.execute(
+                f"""
+                SELECT c.id, c.document_id, c.chunk_index, c.content, c.token_count,
+                       c.created_at, d.title, d.source_uri
+                FROM kb_chunks c
+                JOIN kb_documents d ON d.id = c.document_id
+                {where_clause}
+                ORDER BY c.created_at DESC
+                LIMIT %s OFFSET %s
+                """,
+                tuple(params_with_paging),
+            )
+            rows = cur.fetchall()
+
+    items = []
+    for (
+        chunk_id,
+        doc_id,
+        chunk_index,
+        content,
+        token_count,
+        created_at,
+        title,
+        source_uri,
+    ) in rows:
+        items.append(
+            {
+                "id": str(chunk_id),
+                "document_id": str(doc_id),
+                "chunk_index": chunk_index,
+                "content": content,
+                "token_count": token_count,
+                "created_at": created_at.isoformat() if created_at else None,
+                "title": title,
+                "source_uri": source_uri,
+            }
+        )
+
     return {"total": total, "count": len(items), "items": items}
