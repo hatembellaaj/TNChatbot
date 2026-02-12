@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.db import get_connection
@@ -412,6 +412,122 @@ def _normalize_chunk_params(chunk_size: int | None, overlap: int | None) -> tupl
     return resolved_chunk_size, resolved_overlap
 
 
+
+
+def _ingest_document(
+    *,
+    title: str,
+    source_uri: str,
+    content: str,
+    chunk_size: int,
+    overlap: int,
+    source_type: str = "admin",
+) -> Dict[str, Any]:
+    chunks = chunk_text(content, chunk_size, overlap)
+    if not chunks:
+        raise HTTPException(status_code=400, detail="Aucun chunk généré")
+
+    embeddings = embed_texts(chunks)
+    if not embeddings or not embeddings[0]:
+        raise HTTPException(status_code=502, detail="Les embeddings n'ont pas pu être générés")
+
+    ensure_qdrant_collection(len(embeddings[0]))
+    intent = derive_intent_from_path(Path(f"{title}.txt"))
+
+    with get_connection() as conn:
+        run_id = conn.execute(
+            "INSERT INTO kb_ingestion_runs (status) VALUES ('running') RETURNING id"
+        ).fetchone()[0]
+        doc_id = conn.execute(
+            """
+            INSERT INTO kb_documents (ingestion_run_id, source_type, source_uri, title, status)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (run_id, source_type, source_uri, title, "processing"),
+        ).fetchone()[0]
+
+        points: List[Dict[str, Any]] = []
+        rows: List[Dict[str, Any]] = []
+        for index, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+            chunk_id = uuid.uuid4()
+            token_count = estimate_tokens(chunk)
+            conn.execute(
+                """
+                INSERT INTO kb_chunks (id, document_id, chunk_index, content, embedding, token_count)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (chunk_id, doc_id, index, chunk, json.dumps(embedding), token_count),
+            )
+            rows.append(
+                {
+                    "chunk_id": str(chunk_id),
+                    "chunk_index": index,
+                    "token_count": token_count,
+                    "content_preview": chunk[:220],
+                    "embedding_dimension": len(embedding),
+                }
+            )
+            points.append(
+                {
+                    "id": str(chunk_id),
+                    "vector": embedding,
+                    "payload": {
+                        "document_id": str(doc_id),
+                        "chunk_index": index,
+                        "content": chunk,
+                        "intent": intent,
+                        "source_uri": source_uri,
+                        "title": title,
+                    },
+                }
+            )
+
+        upsert_qdrant_points(points)
+        conn.execute(
+            "UPDATE kb_documents SET status = %s, updated_at = NOW() WHERE id = %s",
+            ("ready", doc_id),
+        )
+        conn.execute(
+            """
+            UPDATE kb_ingestion_runs
+            SET status = %s, finished_at = NOW(), stats = %s
+            WHERE id = %s
+            """,
+            (
+                "finished",
+                json.dumps({"documents": 1, "chunks": len(rows), "skipped": 0}),
+                run_id,
+            ),
+        )
+
+    return {
+        "run_id": str(run_id),
+        "document_id": str(doc_id),
+        "title": title,
+        "source_uri": source_uri,
+        "status": "ready",
+        "rows": rows,
+    }
+
+
+def _decode_upload_content(upload: UploadFile, raw_content: bytes) -> str:
+    if not raw_content:
+        raise HTTPException(status_code=400, detail="Le fichier uploadé est vide")
+    content_type = (upload.content_type or "").lower()
+    if "pdf" in content_type:
+        raise HTTPException(
+            status_code=400,
+            detail="Format PDF non supporté pour le moment. Uploadez un .txt ou .md.",
+        )
+    try:
+        return raw_content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Encodage non supporté. Utilisez un fichier texte UTF-8 (.txt/.md).",
+        ) from exc
+
 @router.post("/api/admin/kb/ingestion/preview")
 def preview_ingestion(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     title = str(payload.get("title") or "").strip() or "Document"
@@ -480,88 +596,38 @@ def run_ingestion(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     if not content.strip():
         raise HTTPException(status_code=400, detail="Le contenu du document est vide")
 
-    chunks = chunk_text(content, chunk_size, overlap)
-    if not chunks:
-        raise HTTPException(status_code=400, detail="Aucun chunk généré")
+    return _ingest_document(
+        title=title,
+        source_uri=source_uri,
+        content=content,
+        chunk_size=chunk_size,
+        overlap=overlap,
+        source_type="admin",
+    )
 
-    embeddings = embed_texts(chunks)
-    if not embeddings or not embeddings[0]:
-        raise HTTPException(status_code=502, detail="Les embeddings n'ont pas pu être générés")
 
-    ensure_qdrant_collection(len(embeddings[0]))
-    intent = derive_intent_from_path(Path(f"{title}.txt"))
+@router.post("/api/admin/kb/ingestion/upload")
+async def run_ingestion_upload(
+    file: UploadFile = File(...),
+    title: str | None = Form(default=None),
+    source_uri: str | None = Form(default=None),
+    chunk_size: int | None = Form(default=None),
+    overlap: int | None = Form(default=None),
+) -> Dict[str, Any]:
+    resolved_chunk_size, resolved_overlap = _normalize_chunk_params(chunk_size, overlap)
+    filename = (file.filename or "document.txt").strip()
+    resolved_title = (title or Path(filename).stem).strip() or "Document"
+    resolved_source_uri = (source_uri or f"admin/upload/{filename}").strip() or f"admin/upload/{filename}"
 
-    with get_connection() as conn:
-        run_id = conn.execute(
-            "INSERT INTO kb_ingestion_runs (status) VALUES ('running') RETURNING id"
-        ).fetchone()[0]
-        doc_id = conn.execute(
-            """
-            INSERT INTO kb_documents (ingestion_run_id, source_type, source_uri, title, status)
-            VALUES (%s, %s, %s, %s, %s)
-            RETURNING id
-            """,
-            (run_id, "admin", source_uri, title, "processing"),
-        ).fetchone()[0]
+    content = _decode_upload_content(file, await file.read())
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="Le contenu du document est vide")
 
-        points: List[Dict[str, Any]] = []
-        rows: List[Dict[str, Any]] = []
-        for index, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-            chunk_id = uuid.uuid4()
-            token_count = estimate_tokens(chunk)
-            conn.execute(
-                """
-                INSERT INTO kb_chunks (id, document_id, chunk_index, content, embedding, token_count)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                """,
-                (chunk_id, doc_id, index, chunk, json.dumps(embedding), token_count),
-            )
-            row = {
-                "chunk_id": str(chunk_id),
-                "chunk_index": index,
-                "token_count": token_count,
-                "content_preview": chunk[:220],
-                "embedding_dimension": len(embedding),
-            }
-            rows.append(row)
-            points.append(
-                {
-                    "id": str(chunk_id),
-                    "vector": embedding,
-                    "payload": {
-                        "document_id": str(doc_id),
-                        "chunk_index": index,
-                        "content": chunk,
-                        "intent": intent,
-                        "source_uri": source_uri,
-                        "title": title,
-                    },
-                }
-            )
-
-        upsert_qdrant_points(points)
-        conn.execute(
-            "UPDATE kb_documents SET status = %s, updated_at = NOW() WHERE id = %s",
-            ("ready", doc_id),
-        )
-        conn.execute(
-            """
-            UPDATE kb_ingestion_runs
-            SET status = %s, finished_at = NOW(), stats = %s
-            WHERE id = %s
-            """,
-            (
-                "finished",
-                json.dumps({"documents": 1, "chunks": len(rows), "skipped": 0}),
-                run_id,
-            ),
-        )
-
-    return {
-        "run_id": str(run_id),
-        "document_id": str(doc_id),
-        "title": title,
-        "source_uri": source_uri,
-        "status": "ready",
-        "rows": rows,
-    }
+    return _ingest_document(
+        title=resolved_title,
+        source_uri=resolved_source_uri,
+        content=content,
+        chunk_size=resolved_chunk_size,
+        overlap=resolved_overlap,
+        source_type="upload",
+    )

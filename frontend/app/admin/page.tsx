@@ -147,6 +147,7 @@ export default function AdminPage() {
   const [ingestionOverlap, setIngestionOverlap] = useState("40");
   const [ingestionPreview, setIngestionPreview] = useState<IngestionPreview | null>(null);
   const [ingestionRun, setIngestionRun] = useState<IngestionRun | null>(null);
+  const [ingestionFile, setIngestionFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -348,6 +349,41 @@ export default function AdminPage() {
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Erreur inconnue pendant l'ingestion.";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runIngestionFromUpload = async () => {
+    if (!apiBase || !password || !ingestionFile) {
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", ingestionFile);
+      formData.append("title", ingestionTitle || ingestionFile.name.replace(/\.[^.]+$/, ""));
+      formData.append("source_uri", ingestionSourceUri || `admin/upload/${ingestionFile.name}`);
+      formData.append("chunk_size", ingestionChunkSize);
+      formData.append("overlap", ingestionOverlap);
+
+      const response = await fetch(`${apiBase}/api/admin/kb/ingestion/upload`, {
+        method: "POST",
+        headers: { "X-Admin-Password": password },
+        body: formData,
+      });
+      if (!response.ok) {
+        throw new Error("Ingestion via upload impossible.");
+      }
+      const payload = (await response.json()) as IngestionRun;
+      setIngestionRun(payload);
+      setIngestionPreview(null);
+      await fetchAdminData();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Erreur inconnue pendant l'upload.";
       setError(message);
     } finally {
       setLoading(false);
@@ -675,7 +711,22 @@ export default function AdminPage() {
             </label>
           </div>
           <label className={styles.tokenField}>
-            <span>Contenu document</span>
+            <span>Uploader un fichier (.txt, .md)</span>
+            <input
+              type="file"
+              accept=".txt,.md,text/plain,text/markdown"
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                setIngestionFile(file);
+                if (file) {
+                  setIngestionTitle((current) => current || file.name.replace(/\.[^.]+$/, ""));
+                  setIngestionSourceUri((current) => current || `admin/upload/${file.name}`);
+                }
+              }}
+            />
+          </label>
+          <label className={styles.tokenField}>
+            <span>Contenu document (optionnel si upload)</span>
             <textarea
               className={styles.textarea}
               value={ingestionContent}
@@ -696,9 +747,17 @@ export default function AdminPage() {
               type="button"
               className={styles.primaryButton}
               onClick={runIngestion}
-              disabled={!isAuthenticated || loading || !ingestionContent.trim()}
+              disabled={!isAuthenticated || loading || (!ingestionContent.trim() && !ingestionFile)}
             >
               Lancer ingestion
+            </button>
+            <button
+              type="button"
+              className={styles.primaryButton}
+              onClick={runIngestionFromUpload}
+              disabled={!isAuthenticated || loading || !ingestionFile}
+            >
+              Uploader et ingérer
             </button>
           </div>
 
