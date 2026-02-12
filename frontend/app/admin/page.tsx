@@ -86,6 +86,48 @@ type KbChunk = {
   source_uri: string | null;
 };
 
+
+type IngestionPreview = {
+  document: {
+    title: string;
+    source_uri: string;
+    char_count: number;
+    token_estimate: number;
+  };
+  split: {
+    block_count: number;
+    blocks: string[];
+  };
+  chunks: Array<{
+    chunk_index: number;
+    content: string;
+    token_count: number;
+    char_count: number;
+    embedding_dimension?: number;
+    embedding_preview?: number[];
+  }>;
+  embeddings: {
+    generated: boolean;
+    count: number;
+    dimension: number;
+  };
+};
+
+type IngestionRun = {
+  run_id: string;
+  document_id: string;
+  title: string;
+  source_uri: string;
+  status: string;
+  rows: Array<{
+    chunk_id: string;
+    chunk_index: number;
+    token_count: number;
+    content_preview: string;
+    embedding_dimension: number;
+  }>;
+};
+
 export default function AdminPage() {
   const apiCandidates = useMemo(() => resolveApiBases(), []);
   const [apiBase, setApiBase] = useState<string | null>(null);
@@ -98,6 +140,13 @@ export default function AdminPage() {
   const [kbChunks, setKbChunks] = useState<KbChunk[]>([]);
   const [kbQuery, setKbQuery] = useState("");
   const [kbDocumentFilter, setKbDocumentFilter] = useState("all");
+  const [ingestionTitle, setIngestionTitle] = useState("");
+  const [ingestionSourceUri, setIngestionSourceUri] = useState("");
+  const [ingestionContent, setIngestionContent] = useState("");
+  const [ingestionChunkSize, setIngestionChunkSize] = useState("200");
+  const [ingestionOverlap, setIngestionOverlap] = useState("40");
+  const [ingestionPreview, setIngestionPreview] = useState<IngestionPreview | null>(null);
+  const [ingestionRun, setIngestionRun] = useState<IngestionRun | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -225,6 +274,81 @@ export default function AdminPage() {
           : "Erreur inconnue lors de la connexion.";
       setError(message);
       setIsAuthenticated(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runIngestionPreview = async () => {
+    if (!apiBase || !password) {
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/admin/kb/ingestion/preview`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Password": password,
+        },
+        body: JSON.stringify({
+          title: ingestionTitle,
+          source_uri: ingestionSourceUri,
+          content: ingestionContent,
+          chunk_size: Number(ingestionChunkSize),
+          overlap: Number(ingestionOverlap),
+          include_embeddings: true,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error("Prévisualisation ingestion impossible.");
+      }
+      const payload = (await response.json()) as IngestionPreview;
+      setIngestionPreview(payload);
+      setIngestionRun(null);
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Erreur inconnue pendant la prévisualisation.";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runIngestion = async () => {
+    if (!apiBase || !password) {
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/admin/kb/ingestion/run`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Password": password,
+        },
+        body: JSON.stringify({
+          title: ingestionTitle,
+          source_uri: ingestionSourceUri,
+          content: ingestionContent,
+          chunk_size: Number(ingestionChunkSize),
+          overlap: Number(ingestionOverlap),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error("Ingestion impossible.");
+      }
+      const payload = (await response.json()) as IngestionRun;
+      setIngestionRun(payload);
+      await fetchAdminData();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Erreur inconnue pendant l'ingestion.";
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -508,6 +632,116 @@ export default function AdminPage() {
           </article>
         </div>
       </section>
+      <section className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <h2>Ingestion manuelle (Admin)</h2>
+          <span>Split → Chunking → Embedding → Indexing</span>
+        </div>
+        <article className={styles.card}>
+          <div className={styles.chunkFilters}>
+            <label>
+              <span>Titre</span>
+              <input
+                type="text"
+                value={ingestionTitle}
+                onChange={(event) => setIngestionTitle(event.target.value)}
+                placeholder="Titre du document"
+              />
+            </label>
+            <label>
+              <span>Source URI</span>
+              <input
+                type="text"
+                value={ingestionSourceUri}
+                onChange={(event) => setIngestionSourceUri(event.target.value)}
+                placeholder="admin/manual/document"
+              />
+            </label>
+            <label>
+              <span>Chunk size</span>
+              <input
+                type="number"
+                value={ingestionChunkSize}
+                onChange={(event) => setIngestionChunkSize(event.target.value)}
+              />
+            </label>
+            <label>
+              <span>Overlap</span>
+              <input
+                type="number"
+                value={ingestionOverlap}
+                onChange={(event) => setIngestionOverlap(event.target.value)}
+              />
+            </label>
+          </div>
+          <label className={styles.tokenField}>
+            <span>Contenu document</span>
+            <textarea
+              className={styles.textarea}
+              value={ingestionContent}
+              onChange={(event) => setIngestionContent(event.target.value)}
+              placeholder="Collez votre document ici..."
+            />
+          </label>
+          <div className={styles.actions}>
+            <button
+              type="button"
+              className={styles.primaryButton}
+              onClick={runIngestionPreview}
+              disabled={!isAuthenticated || loading || !ingestionContent.trim()}
+            >
+              Prévisualiser pipeline
+            </button>
+            <button
+              type="button"
+              className={styles.primaryButton}
+              onClick={runIngestion}
+              disabled={!isAuthenticated || loading || !ingestionContent.trim()}
+            >
+              Lancer ingestion
+            </button>
+          </div>
+
+          {ingestionPreview ? (
+            <div className={styles.ingestionGrid}>
+              <div>
+                <h3>Split</h3>
+                <p>{ingestionPreview.split.block_count} blocs détectés</p>
+              </div>
+              <div>
+                <h3>Chunking</h3>
+                <p>{ingestionPreview.chunks.length} chunks générés</p>
+              </div>
+              <div>
+                <h3>Embedding</h3>
+                <p>Dimension: {ingestionPreview.embeddings.dimension || "—"}</p>
+              </div>
+            </div>
+          ) : null}
+
+          {ingestionRun ? (
+            <div className={styles.leadsTable}>
+              <div className={styles.ingestionTableHeader}>
+                <span>Chunk</span>
+                <span>Tokens</span>
+                <span>Dimension</span>
+                <span>Aperçu contenu</span>
+                <span>Chunk ID</span>
+              </div>
+              {ingestionRun.rows.map((row) => (
+                <div key={row.chunk_id} className={styles.ingestionTableRow}>
+                  <span>{row.chunk_index + 1}</span>
+                  <span>{row.token_count}</span>
+                  <span>{row.embedding_dimension}</span>
+                  <span>{row.content_preview}</span>
+                  <span>{row.chunk_id.slice(0, 12)}...</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </article>
+      </section>
+
     </main>
   );
 }

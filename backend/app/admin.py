@@ -2,12 +2,22 @@ import csv
 import io
 import json
 import os
+import uuid
+from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from app.db import get_connection
+from app.rag.ingest import (
+    derive_intent_from_path,
+    embed_texts,
+    ensure_qdrant_collection,
+    estimate_tokens,
+    upsert_qdrant_points,
+    chunk_text,
+)
 
 ADMIN_CONFIG_KEYS = ("audience_metrics", "offers_copy", "email_config", "sectors")
 
@@ -385,3 +395,173 @@ def get_kb_chunks(
         )
 
     return {"total": total, "count": len(items), "items": items}
+
+
+def _normalize_chunk_params(chunk_size: int | None, overlap: int | None) -> tuple[int, int]:
+    resolved_chunk_size = chunk_size or int(os.getenv("RAG_CHUNK_SIZE", "200"))
+    resolved_overlap = overlap if overlap is not None else int(os.getenv("RAG_CHUNK_OVERLAP", "40"))
+    if resolved_chunk_size <= 0:
+        raise HTTPException(status_code=400, detail="chunk_size doit être supérieur à 0")
+    if resolved_overlap < 0:
+        raise HTTPException(status_code=400, detail="overlap doit être supérieur ou égal à 0")
+    if resolved_overlap >= resolved_chunk_size:
+        raise HTTPException(
+            status_code=400,
+            detail="overlap doit être strictement inférieur à chunk_size",
+        )
+    return resolved_chunk_size, resolved_overlap
+
+
+@router.post("/api/admin/kb/ingestion/preview")
+def preview_ingestion(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    title = str(payload.get("title") or "").strip() or "Document"
+    content = str(payload.get("content") or "")
+    source_uri = str(payload.get("source_uri") or title)
+    include_embeddings = bool(payload.get("include_embeddings", True))
+    chunk_size, overlap = _normalize_chunk_params(payload.get("chunk_size"), payload.get("overlap"))
+
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="Le contenu du document est vide")
+
+    split_blocks = [block.strip() for block in content.split("\n\n") if block.strip()]
+    chunks = chunk_text(content, chunk_size, overlap)
+    preview_chunks: List[Dict[str, Any]] = []
+    for index, chunk in enumerate(chunks):
+        preview_chunks.append(
+            {
+                "chunk_index": index,
+                "content": chunk,
+                "token_count": estimate_tokens(chunk),
+                "char_count": len(chunk),
+            }
+        )
+
+    embeddings: List[List[float]] = []
+    embedding_dimension = 0
+    if include_embeddings and chunks:
+        embeddings = embed_texts(chunks)
+        embedding_dimension = len(embeddings[0]) if embeddings and embeddings[0] else 0
+        for index, values in enumerate(embeddings):
+            preview_chunks[index]["embedding_dimension"] = len(values)
+            preview_chunks[index]["embedding_preview"] = values[:8]
+
+    return {
+        "document": {
+            "title": title,
+            "source_uri": source_uri,
+            "char_count": len(content),
+            "token_estimate": estimate_tokens(content),
+        },
+        "params": {
+            "chunk_size": chunk_size,
+            "overlap": overlap,
+            "include_embeddings": include_embeddings,
+        },
+        "split": {
+            "block_count": len(split_blocks),
+            "blocks": split_blocks,
+        },
+        "chunks": preview_chunks,
+        "embeddings": {
+            "generated": include_embeddings,
+            "count": len(embeddings),
+            "dimension": embedding_dimension,
+        },
+    }
+
+
+@router.post("/api/admin/kb/ingestion/run")
+def run_ingestion(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    title = str(payload.get("title") or "").strip() or "Document"
+    content = str(payload.get("content") or "")
+    source_uri = str(payload.get("source_uri") or title)
+    chunk_size, overlap = _normalize_chunk_params(payload.get("chunk_size"), payload.get("overlap"))
+
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="Le contenu du document est vide")
+
+    chunks = chunk_text(content, chunk_size, overlap)
+    if not chunks:
+        raise HTTPException(status_code=400, detail="Aucun chunk généré")
+
+    embeddings = embed_texts(chunks)
+    if not embeddings or not embeddings[0]:
+        raise HTTPException(status_code=502, detail="Les embeddings n'ont pas pu être générés")
+
+    ensure_qdrant_collection(len(embeddings[0]))
+    intent = derive_intent_from_path(Path(f"{title}.txt"))
+
+    with get_connection() as conn:
+        run_id = conn.execute(
+            "INSERT INTO kb_ingestion_runs (status) VALUES ('running') RETURNING id"
+        ).fetchone()[0]
+        doc_id = conn.execute(
+            """
+            INSERT INTO kb_documents (ingestion_run_id, source_type, source_uri, title, status)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (run_id, "admin", source_uri, title, "processing"),
+        ).fetchone()[0]
+
+        points: List[Dict[str, Any]] = []
+        rows: List[Dict[str, Any]] = []
+        for index, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+            chunk_id = uuid.uuid4()
+            token_count = estimate_tokens(chunk)
+            conn.execute(
+                """
+                INSERT INTO kb_chunks (id, document_id, chunk_index, content, embedding, token_count)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (chunk_id, doc_id, index, chunk, json.dumps(embedding), token_count),
+            )
+            row = {
+                "chunk_id": str(chunk_id),
+                "chunk_index": index,
+                "token_count": token_count,
+                "content_preview": chunk[:220],
+                "embedding_dimension": len(embedding),
+            }
+            rows.append(row)
+            points.append(
+                {
+                    "id": str(chunk_id),
+                    "vector": embedding,
+                    "payload": {
+                        "document_id": str(doc_id),
+                        "chunk_index": index,
+                        "content": chunk,
+                        "intent": intent,
+                        "source_uri": source_uri,
+                        "title": title,
+                    },
+                }
+            )
+
+        upsert_qdrant_points(points)
+        conn.execute(
+            "UPDATE kb_documents SET status = %s, updated_at = NOW() WHERE id = %s",
+            ("ready", doc_id),
+        )
+        conn.execute(
+            """
+            UPDATE kb_ingestion_runs
+            SET status = %s, finished_at = NOW(), stats = %s
+            WHERE id = %s
+            """,
+            (
+                "finished",
+                json.dumps({"documents": 1, "chunks": len(rows), "skipped": 0}),
+                run_id,
+            ),
+        )
+
+    return {
+        "run_id": str(run_id),
+        "document_id": str(doc_id),
+        "title": title,
+        "source_uri": source_uri,
+        "status": "ready",
+        "rows": rows,
+    }
