@@ -5,9 +5,23 @@ import { useEffect, useMemo, useState } from "react";
 import styles from "./page.module.css";
 
 const DEFAULT_BACKEND_PORT = "19081";
+const DEV_BACKEND_PORT = "8000";
 
 const formatHostname = (hostname: string) =>
   hostname.includes(":") ? `[${hostname}]` : hostname;
+
+const resolveBackendPort = (frontendPort: string) => {
+  if (process.env.NEXT_PUBLIC_BACKEND_PORT) {
+    return process.env.NEXT_PUBLIC_BACKEND_PORT;
+  }
+  if (frontendPort === "3000") {
+    return DEV_BACKEND_PORT;
+  }
+  if (frontendPort === "19080") {
+    return DEFAULT_BACKEND_PORT;
+  }
+  return DEFAULT_BACKEND_PORT;
+};
 
 const resolveApiBases = () => {
   const bases: string[] = [];
@@ -21,8 +35,7 @@ const resolveApiBases = () => {
     const { origin, protocol, hostname, port } = window.location;
     bases.push(origin);
 
-    const backendPort =
-      process.env.NEXT_PUBLIC_BACKEND_PORT ?? DEFAULT_BACKEND_PORT;
+    const backendPort = resolveBackendPort(port);
     if (backendPort && backendPort !== port) {
       bases.push(`${protocol}//${formatHostname(hostname)}:${backendPort}`);
     }
