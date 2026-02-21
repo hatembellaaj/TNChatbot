@@ -334,6 +334,33 @@
   color: #5c5f7a;
 }
 
+.previewSection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.previewInfo {
+  margin: 0;
+  color: #8a6d1a;
+  background: #fff7df;
+  border: 1px solid #f2e2a7;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.previewBlockList {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.previewBlockList li {
+  color: #2a2d44;
+}
+
 .ingestionTableHeader,
 .ingestionTableRow {
   display: grid;

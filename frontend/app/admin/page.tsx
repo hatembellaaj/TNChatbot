@@ -125,6 +125,10 @@ type IngestionPreview = {
   };
 };
 
+type ApiErrorPayload = {
+  detail?: string;
+};
+
 type IngestionRun = {
   run_id: string;
   document_id: string;
@@ -188,6 +192,7 @@ export default function AdminPage() {
   const [transformDecision, setTransformDecision] = useState<TransformDecision>("idle");
   const [ingestionLogs, setIngestionLogs] = useState<IngestionLogEntry[]>([]);
   const [streamRunning, setStreamRunning] = useState(false);
+  const [previewInfo, setPreviewInfo] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AdminTab>("conversations");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -273,6 +278,18 @@ export default function AdminPage() {
     setKbChunks(kbChunksPayload.items ?? []);
   };
 
+  const extractApiError = async (response: Response, fallbackMessage: string) => {
+    try {
+      const payload = (await response.json()) as ApiErrorPayload;
+      if (payload.detail) {
+        return payload.detail;
+      }
+    } catch {
+      // ignore non-json errors
+    }
+    return fallbackMessage;
+  };
+
   const fetchKbChunks = async () => {
     if (!apiBase || !password) {
       return;
@@ -343,25 +360,43 @@ export default function AdminPage() {
     }
     setLoading(true);
     setError(null);
+    setPreviewInfo(null);
     try {
-      const response = await fetch(`${apiBase}/api/admin/kb/ingestion/preview`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Admin-Password": password,
-        },
-        body: JSON.stringify({
-          title: ingestionTitle,
-          source_uri: ingestionSourceUri,
-          content: ingestionContent,
-          chunk_size: Number(ingestionChunkSize),
-          overlap: Number(ingestionOverlap),
-          include_embeddings: true,
-        }),
-      });
+      const requestPreview = async (includeEmbeddings: boolean) => {
+        const response = await fetch(`${apiBase}/api/admin/kb/ingestion/preview`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Admin-Password": password,
+          },
+          body: JSON.stringify({
+            title: ingestionTitle,
+            source_uri: ingestionSourceUri,
+            content: ingestionContent,
+            chunk_size: Number(ingestionChunkSize),
+            overlap: Number(ingestionOverlap),
+            include_embeddings: includeEmbeddings,
+          }),
+        });
+        return response;
+      };
+
+      let response = await requestPreview(true);
       if (!response.ok) {
-        throw new Error("Prévisualisation ingestion impossible.");
+        const detailedError = await extractApiError(
+          response,
+          "Prévisualisation ingestion impossible.",
+        );
+        response = await requestPreview(false);
+        if (response.ok) {
+          setPreviewInfo(
+            `Prévisualisation générée sans embeddings (${detailedError}).`,
+          );
+        } else {
+          throw new Error(detailedError);
+        }
       }
+
       const payload = (await response.json()) as IngestionPreview;
       setIngestionPreview(payload);
       setIngestionRun(null);
@@ -1049,19 +1084,74 @@ export default function AdminPage() {
           ) : null}
 
           {ingestionPreview ? (
-            <div className={styles.ingestionGrid}>
-              <div>
-                <h3>Split</h3>
-                <p>{ingestionPreview.split.block_count} blocs détectés</p>
+            <div className={styles.previewSection}>
+              {previewInfo ? <p className={styles.previewInfo}>{previewInfo}</p> : null}
+              <div className={styles.ingestionGrid}>
+                <div>
+                  <h3>Split</h3>
+                  <p>{ingestionPreview.split.block_count} blocs détectés</p>
+                </div>
+                <div>
+                  <h3>Chunking</h3>
+                  <p>{ingestionPreview.chunks.length} chunks générés</p>
+                </div>
+                <div>
+                  <h3>Embedding</h3>
+                  <p>Dimension: {ingestionPreview.embeddings.dimension || "—"}</p>
+                </div>
+                <div>
+                  <h3>Document</h3>
+                  <p>{ingestionPreview.document.token_estimate} tokens estimés</p>
+                </div>
               </div>
-              <div>
-                <h3>Chunking</h3>
-                <p>{ingestionPreview.chunks.length} chunks générés</p>
+
+              <h3>Aperçu du split (premiers blocs)</h3>
+              <ul className={styles.previewBlockList}>
+                {ingestionPreview.split.blocks.slice(0, 3).map((block, index) => (
+                  <li key={`split-${index}`}>{block}</li>
+                ))}
+              </ul>
+
+              <h3>Aperçu des chunks</h3>
+              <div className={styles.leadsTable}>
+                <div className={styles.ingestionTableHeader}>
+                  <span>Chunk</span>
+                  <span>Tokens</span>
+                  <span>Chars</span>
+                  <span>Contenu</span>
+                  <span>Embedding</span>
+                </div>
+                {ingestionPreview.chunks.slice(0, 5).map((chunk) => (
+                  <div key={`preview-${chunk.chunk_index}`} className={styles.ingestionTableRow}>
+                    <span>{chunk.chunk_index + 1}</span>
+                    <span>{chunk.token_count}</span>
+                    <span>{chunk.char_count}</span>
+                    <span>{chunk.content}</span>
+                    <span>{chunk.embedding_dimension ?? "—"}</span>
+                  </div>
+                ))}
               </div>
-              <div>
-                <h3>Embedding</h3>
-                <p>Dimension: {ingestionPreview.embeddings.dimension || "—"}</p>
+            </div>
+          ) : null}
+
+          {ingestionLogs.length > 0 ? (
+            <div className={styles.leadsTable}>
+              <div className={styles.ingestionTableHeader}>
+                <span>Horodatage</span>
+                <span>Événement</span>
+                <span>Détails</span>
+                <span>Statut</span>
+                <span>—</span>
               </div>
+              {ingestionLogs.map((log, index) => (
+                <div key={`${log.timestamp}-${index}`} className={styles.ingestionTableRow}>
+                  <span>{new Date(log.timestamp).toLocaleTimeString("fr-FR")}</span>
+                  <span>{log.event}</span>
+                  <span>{JSON.stringify(log.data)}</span>
+                  <span>{log.event === "error" || log.event === "client_error" ? "❌" : "✅"}</span>
+                  <span>{streamRunning && index === ingestionLogs.length - 1 ? "en cours..." : ""}</span>
+                </div>
+              ))}
             </div>
           ) : null}
 
