@@ -241,6 +241,56 @@
   margin: 0;
 }
 
+.kbTable {
+  display: grid;
+  gap: 10px;
+}
+
+.kbTableHeader,
+.kbTableRow {
+  display: grid;
+  grid-template-columns: 1.5fr 1.5fr 0.7fr 1fr 0.8fr;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.kbTableHeader {
+  font-weight: 600;
+  color: #5c5f7a;
+}
+
+.kbTableRow {
+  padding: 10px 0;
+  border-top: 1px solid #eef0f8;
+}
+
+.inlineButton {
+  background: transparent;
+  border: 1px solid #3949f0;
+  color: #3949f0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  width: fit-content;
+}
+
+.detailPanel {
+  margin-top: 8px;
+  border: 1px solid #eef0f8;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fafbff;
+}
+
+.detailPanel h4 {
+  margin: 0 0 8px;
+}
+
+.detailPanel p {
+  margin: 4px 0;
+}
+
 .kbList {
   list-style: none;
   margin: 0;
@@ -300,6 +350,11 @@
 @media (max-width: 900px) {
   .tableHeader,
   .tableRow {
+    grid-template-columns: 1fr;
+  }
+
+  .kbTableHeader,
+  .kbTableRow {
     grid-template-columns: 1fr;
   }
 
