@@ -16,6 +16,7 @@ DEFAULT_QDRANT_URL = "http://localhost:6333"
 DEFAULT_QDRANT_COLLECTION = "tnchatbot_kb"
 DEFAULT_EMBEDDING_URL = "http://localhost:8001/v1/embeddings"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+DEFAULT_EMBEDDING_TIMEOUT_SECONDS = 30
 
 LOGGER = logging.getLogger(__name__)
 
@@ -25,13 +26,18 @@ def get_connection() -> psycopg.Connection:
     return psycopg.connect(database_url)
 
 
-def request_json(method: str, url: str, payload: dict | None = None) -> dict:
+def request_json(
+    method: str,
+    url: str,
+    payload: dict | None = None,
+    timeout_seconds: float = DEFAULT_EMBEDDING_TIMEOUT_SECONDS,
+) -> dict:
     data = None
     headers = {"Content-Type": "application/json"}
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
     request = Request(url, data=data, headers=headers, method=method)
-    with urlopen(request, timeout=30) as response:
+    with urlopen(request, timeout=timeout_seconds) as response:
         body = response.read().decode("utf-8")
     if not body:
         return {}
@@ -91,14 +97,28 @@ def embed_texts(texts: Sequence[str]) -> List[List[float]]:
         return []
     embedding_url = os.getenv("EMBEDDING_URL", DEFAULT_EMBEDDING_URL)
     embedding_model = os.getenv("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)
+    timeout_seconds = float(
+        os.getenv("EMBEDDING_TIMEOUT_SECONDS", str(DEFAULT_EMBEDDING_TIMEOUT_SECONDS))
+    )
     payload = {
         "model": embedding_model,
         "input": texts,
     }
     try:
-        response = request_json("POST", embedding_url, payload)
-    except (HTTPError, URLError, TimeoutError) as exc:
-        raise RuntimeError("Embedding request failed") from exc
+        response = request_json("POST", embedding_url, payload, timeout_seconds=timeout_seconds)
+    except HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+        detail = (
+            f"Embedding request failed ({exc.code})"
+            f" for model '{embedding_model}' via '{embedding_url}'"
+        )
+        if error_body:
+            detail = f"{detail}: {error_body}"
+        raise RuntimeError(detail) from exc
+    except (URLError, TimeoutError) as exc:
+        raise RuntimeError(
+            f"Embedding request failed for model '{embedding_model}' via '{embedding_url}': {exc}"
+        ) from exc
 
     data = response.get("data", [])
     embeddings: List[List[float]] = []

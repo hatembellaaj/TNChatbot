@@ -436,7 +436,10 @@ def _ingest_document(
     if report:
         report("chunking_completed", {"chunks": len(chunks)})
         report("embedding_started", {"chunks": len(chunks)})
-    embeddings = embed_texts(chunks)
+    try:
+        embeddings = embed_texts(chunks)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     if not embeddings or not embeddings[0]:
         raise HTTPException(status_code=502, detail="Les embeddings n'ont pas pu être générés")
 
@@ -650,7 +653,7 @@ def preview_ingestion(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         except RuntimeError as exc:
             raise HTTPException(
                 status_code=502,
-                detail="Impossible de générer les embeddings pour la prévisualisation",
+                detail=f"Impossible de générer les embeddings pour la prévisualisation: {exc}",
             ) from exc
         embedding_dimension = len(embeddings[0]) if embeddings and embeddings[0] else 0
         for index, values in enumerate(embeddings):
