@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,7 @@ DEFAULT_QDRANT_COLLECTION = "tnchatbot_kb"
 DEFAULT_EMBEDDING_URL = "http://localhost:8001/v1/embeddings"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_EMBEDDING_TIMEOUT_SECONDS = 30
+DEFAULT_EMBEDDING_MAX_RETRIES = 2
 
 LOGGER = logging.getLogger(__name__)
 
@@ -100,25 +102,54 @@ def embed_texts(texts: Sequence[str]) -> List[List[float]]:
     timeout_seconds = float(
         os.getenv("EMBEDDING_TIMEOUT_SECONDS", str(DEFAULT_EMBEDDING_TIMEOUT_SECONDS))
     )
+    max_retries = int(os.getenv("EMBEDDING_MAX_RETRIES", str(DEFAULT_EMBEDDING_MAX_RETRIES)))
     payload = {
         "model": embedding_model,
         "input": texts,
     }
-    try:
-        response = request_json("POST", embedding_url, payload, timeout_seconds=timeout_seconds)
-    except HTTPError as exc:
-        error_body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
-        detail = (
-            f"Embedding request failed ({exc.code})"
-            f" for model '{embedding_model}' via '{embedding_url}'"
+    response: dict | None = None
+    last_error: Exception | None = None
+    attempts = max_retries + 1
+    for attempt in range(1, attempts + 1):
+        try:
+            response = request_json("POST", embedding_url, payload, timeout_seconds=timeout_seconds)
+            break
+        except HTTPError as exc:
+            retryable = exc.code == 429 or 500 <= exc.code < 600
+            if not retryable or attempt == attempts:
+                error_body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+                detail = (
+                    f"Embedding request failed ({exc.code})"
+                    f" for model '{embedding_model}' via '{embedding_url}'"
+                )
+                if error_body:
+                    detail = f"{detail}: {error_body}"
+                if attempts > 1:
+                    detail = f"{detail} after {attempt} attempt(s)"
+                raise RuntimeError(detail) from exc
+            last_error = exc
+        except (URLError, TimeoutError) as exc:
+            if attempt == attempts:
+                detail = (
+                    f"Embedding request failed for model '{embedding_model}' via '{embedding_url}': {exc}"
+                )
+                if attempts > 1:
+                    detail = f"{detail} after {attempt} attempt(s)"
+                raise RuntimeError(detail) from exc
+            last_error = exc
+
+        wait_seconds = min(0.5 * attempt, 2.0)
+        LOGGER.warning(
+            "Embedding request attempt %s/%s failed: %s; retrying in %.1fs",
+            attempt,
+            attempts,
+            last_error,
+            wait_seconds,
         )
-        if error_body:
-            detail = f"{detail}: {error_body}"
-        raise RuntimeError(detail) from exc
-    except (URLError, TimeoutError) as exc:
-        raise RuntimeError(
-            f"Embedding request failed for model '{embedding_model}' via '{embedding_url}': {exc}"
-        ) from exc
+        time.sleep(wait_seconds)
+
+    if response is None:
+        raise RuntimeError("Embedding request failed before receiving a response")
 
     data = response.get("data", [])
     embeddings: List[List[float]] = []

@@ -50,3 +50,31 @@ def test_embed_texts_uses_embedding_timeout_seconds_env(monkeypatch):
 
     assert embeddings == [[0.1, 0.2]]
     assert observed["timeout_seconds"] == 77.0
+
+
+def test_embed_texts_retries_timeout_before_success(monkeypatch):
+    calls = {"count": 0}
+
+    def fake_request_json(*_args, **_kwargs):
+        calls["count"] += 1
+        if calls["count"] < 3:
+            raise TimeoutError("timed out")
+        return {"data": [{"embedding": [0.9, 0.8]}]}
+
+    monkeypatch.setattr(ingest, "request_json", fake_request_json)
+    monkeypatch.setattr(ingest.time, "sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setenv("EMBEDDING_MAX_RETRIES", "2")
+
+    embeddings = ingest.embed_texts(["bonjour"])
+
+    assert embeddings == [[0.9, 0.8]]
+    assert calls["count"] == 3
+
+
+def test_embed_texts_reports_attempt_count_when_retries_exhausted(monkeypatch):
+    monkeypatch.setattr(ingest, "request_json", lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("timed out")))
+    monkeypatch.setattr(ingest.time, "sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setenv("EMBEDDING_MAX_RETRIES", "1")
+
+    with pytest.raises(RuntimeError, match=r"after 2 attempt\(s\)"):
+        ingest.embed_texts(["bonjour"])
