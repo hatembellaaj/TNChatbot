@@ -178,6 +178,8 @@ export default function AdminPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [kbDocuments, setKbDocuments] = useState<KbDocument[]>([]);
   const [kbChunks, setKbChunks] = useState<KbChunk[]>([]);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  const [selectedChunkId, setSelectedChunkId] = useState<string | null>(null);
   const [kbQuery, setKbQuery] = useState("");
   const [kbDocumentFilter, setKbDocumentFilter] = useState("all");
   const [ingestionTitle, setIngestionTitle] = useState("");
@@ -197,6 +199,16 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const hasDiscoveredBackend = useRef(false);
+
+  const selectedDocument = useMemo(
+    () => kbDocuments.find((doc) => doc.id === selectedDocumentId) ?? null,
+    [kbDocuments, selectedDocumentId],
+  );
+
+  const selectedChunk = useMemo(
+    () => kbChunks.find((chunk) => chunk.id === selectedChunkId) ?? null,
+    [kbChunks, selectedChunkId],
+  );
 
   useEffect(() => {
     if (hasDiscoveredBackend.current) {
@@ -276,6 +288,16 @@ export default function AdminPage() {
     setLeads(leadsPayload.items ?? []);
     setKbDocuments(kbDocsPayload.items ?? []);
     setKbChunks(kbChunksPayload.items ?? []);
+    setSelectedDocumentId((current) =>
+      (kbDocsPayload.items ?? []).some((doc) => doc.id === current)
+        ? current
+        : null,
+    );
+    setSelectedChunkId((current) =>
+      (kbChunksPayload.items ?? []).some((chunk) => chunk.id === current)
+        ? current
+        : null,
+    );
   };
 
   const extractApiError = async (response: Response, fallbackMessage: string) => {
@@ -314,6 +336,11 @@ export default function AdminPage() {
       }
       const payload = (await response.json()) as { items: KbChunk[] };
       setKbChunks(payload.items ?? []);
+      setSelectedChunkId((current) =>
+        (payload.items ?? []).some((chunk) => chunk.id === current)
+          ? current
+          : null,
+      );
     } catch (err) {
       const message =
         err instanceof Error
@@ -830,40 +857,56 @@ export default function AdminPage() {
             {kbDocuments.length} documents · {kbChunks.length} chunks
           </span>
         </div>
-        <div className={styles.kbGrid}>
+        <div className={styles.kbStack}>
           <article className={styles.card}>
             <header className={styles.kbHeader}>
               <h3>Documents ingérés</h3>
               <span>Dernières mises à jour</span>
             </header>
-            <ul className={styles.kbList}>
+            <div className={styles.kbTable}>
+              <div className={styles.kbTableHeader}>
+                <span>Titre</span>
+                <span>Source</span>
+                <span>Chunks</span>
+                <span>Mise à jour</span>
+                <span>Action</span>
+              </div>
               {kbDocuments.length === 0 ? (
-                <li className={styles.emptyState}>
+                <div className={styles.emptyState}>
                   Aucun document n'a encore été ingéré.
-                </li>
+                </div>
               ) : (
                 kbDocuments.map((doc) => (
-                  <li key={doc.id} className={styles.kbItem}>
-                    <div>
-                      <strong>{doc.title ?? "Sans titre"}</strong>
-                      <p className={styles.kbMeta}>
-                        {doc.source_type} ·{" "}
-                        {doc.source_uri ?? "Source inconnue"}
-                      </p>
-                    </div>
-                    <div className={styles.kbMeta}>
-                      <span>{doc.chunk_count} chunks</span>
-                      <span>
-                        {doc.updated_at
-                          ? new Date(doc.updated_at).toLocaleString("fr-FR")
-                          : "Date inconnue"}
-                      </span>
-                      <span>Statut : {doc.status}</span>
-                    </div>
-                  </li>
+                  <div key={doc.id} className={styles.kbTableRow}>
+                    <span>{doc.title ?? "Sans titre"}</span>
+                    <span>{doc.source_uri ?? "Source inconnue"}</span>
+                    <span>{doc.chunk_count}</span>
+                    <span>
+                      {doc.updated_at
+                        ? new Date(doc.updated_at).toLocaleString("fr-FR")
+                        : "Date inconnue"}
+                    </span>
+                    <button
+                      type="button"
+                      className={styles.inlineButton}
+                      onClick={() => setSelectedDocumentId(doc.id)}
+                    >
+                      Consulter
+                    </button>
+                  </div>
                 ))
               )}
-            </ul>
+            </div>
+            {selectedDocument ? (
+              <div className={styles.detailPanel}>
+                <h4>Détail du document</h4>
+                <p><strong>Titre :</strong> {selectedDocument.title ?? "Sans titre"}</p>
+                <p><strong>ID :</strong> {selectedDocument.id}</p>
+                <p><strong>Type :</strong> {selectedDocument.source_type}</p>
+                <p><strong>Source :</strong> {selectedDocument.source_uri ?? "Source inconnue"}</p>
+                <p><strong>Statut :</strong> {selectedDocument.status}</p>
+              </div>
+            ) : null}
           </article>
           <article className={styles.card}>
             <header className={styles.kbHeader}>
@@ -903,40 +946,53 @@ export default function AdminPage() {
                 Filtrer
               </button>
             </div>
-            <ul className={styles.kbList}>
+            <div className={styles.kbTable}>
+              <div className={styles.kbTableHeader}>
+                <span>Document</span>
+                <span>Chunk</span>
+                <span>Tokens</span>
+                <span>Création</span>
+                <span>Action</span>
+              </div>
               {kbChunks.length === 0 ? (
-                <li className={styles.emptyState}>
+                <div className={styles.emptyState}>
                   Aucun chunk disponible pour les filtres actuels.
-                </li>
+                </div>
               ) : (
                 kbChunks.map((chunk) => (
-                  <li key={chunk.id} className={styles.kbItem}>
-                    <div>
-                      <strong>
-                        {chunk.title ?? "Document sans titre"} · Chunk{" "}
-                        {chunk.chunk_index + 1}
-                      </strong>
-                      <p className={styles.kbMeta}>
-                        {chunk.source_uri ?? "Source inconnue"}
-                      </p>
-                    </div>
-                    <p className={styles.chunkContent}>{chunk.content}</p>
-                    <div className={styles.kbMeta}>
-                      <span>
-                        {chunk.token_count
-                          ? `${chunk.token_count} tokens`
-                          : "Tokens inconnus"}
-                      </span>
-                      <span>
-                        {chunk.created_at
-                          ? new Date(chunk.created_at).toLocaleString("fr-FR")
-                          : "Date inconnue"}
-                      </span>
-                    </div>
-                  </li>
+                  <div key={chunk.id} className={styles.kbTableRow}>
+                    <span>{chunk.title ?? "Document sans titre"}</span>
+                    <span>{chunk.chunk_index + 1}</span>
+                    <span>
+                      {chunk.token_count
+                        ? `${chunk.token_count} tokens`
+                        : "Inconnu"}
+                    </span>
+                    <span>
+                      {chunk.created_at
+                        ? new Date(chunk.created_at).toLocaleString("fr-FR")
+                        : "Date inconnue"}
+                    </span>
+                    <button
+                      type="button"
+                      className={styles.inlineButton}
+                      onClick={() => setSelectedChunkId(chunk.id)}
+                    >
+                      Consulter
+                    </button>
+                  </div>
                 ))
               )}
-            </ul>
+            </div>
+            {selectedChunk ? (
+              <div className={styles.detailPanel}>
+                <h4>Détail du chunk</h4>
+                <p><strong>ID :</strong> {selectedChunk.id}</p>
+                <p><strong>Document ID :</strong> {selectedChunk.document_id}</p>
+                <p><strong>Source :</strong> {selectedChunk.source_uri ?? "Source inconnue"}</p>
+                <p className={styles.chunkContent}>{selectedChunk.content}</p>
+              </div>
+            ) : null}
           </article>
         </div>
       </section>
