@@ -17,6 +17,48 @@ cd infra
  docker compose up --build
 ```
 
+### Vérifier que le backend est bien démarré
+
+Si `curl http://localhost:19081/health` échoue **et** que `docker compose ps backend` ne renvoie rien,
+cela signifie en général que le service backend n'a pas été créé/démarré (ou a crash immédiatement).
+
+```bash
+cd infra
+docker compose ps backend
+docker compose ps -a backend
+docker compose logs backend --tail=200
+```
+
+Démarrage (ou relance) explicite du backend avec rebuild :
+
+```bash
+cd infra
+docker compose up -d --build backend
+```
+
+Si besoin, démarrez aussi ses dépendances :
+
+```bash
+cd infra
+docker compose up -d postgres qdrant ollama
+```
+
+Puis retestez :
+
+```bash
+curl http://localhost:19081/health
+```
+
+Si le backend retombe, regardez l'erreur exacte dans les logs (`database`, `migration`, `port`, etc.) :
+
+```bash
+cd infra
+docker compose logs -f backend
+```
+
+> Astuce : si vous lancez le frontend en mode dev (`npm run dev`, port `3000`), le backend
+> doit être accessible sur `http://localhost:8000`.
+
 ## Services exposés
 
 - Backend : http://localhost:8000 (ou `BACKEND_PORT`)

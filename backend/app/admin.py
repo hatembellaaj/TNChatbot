@@ -8,6 +8,7 @@ from typing import Any, Dict, Iterable, List
 
 from fastapi import APIRouter, Body, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
+from pypdf import PdfReader
 
 from app.db import get_connection
 from app.rag.ingest import (
@@ -514,19 +515,87 @@ def _ingest_document(
 def _decode_upload_content(upload: UploadFile, raw_content: bytes) -> str:
     if not raw_content:
         raise HTTPException(status_code=400, detail="Le fichier uploadé est vide")
+
     content_type = (upload.content_type or "").lower()
-    if "pdf" in content_type:
-        raise HTTPException(
-            status_code=400,
-            detail="Format PDF non supporté pour le moment. Uploadez un .txt ou .md.",
-        )
+    filename = (upload.filename or "").lower()
+
     try:
+        if "pdf" in content_type or filename.endswith(".pdf"):
+            reader = PdfReader(io.BytesIO(raw_content))
+            pages = [(page.extract_text() or "").strip() for page in reader.pages]
+            content = "\n\n".join(page for page in pages if page)
+            if not content:
+                raise HTTPException(status_code=400, detail="Aucun texte exploitable trouvé dans le PDF")
+            return content
+
+        if "jsonl" in content_type or filename.endswith(".jsonl"):
+            lines = raw_content.decode("utf-8").splitlines()
+            parsed_lines = []
+            for index, line in enumerate(lines, start=1):
+                if not line.strip():
+                    continue
+                try:
+                    parsed_lines.append(json.dumps(json.loads(line), ensure_ascii=False, indent=2))
+                except json.JSONDecodeError as exc:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"JSONL invalide à la ligne {index}",
+                    ) from exc
+            return "\n\n".join(parsed_lines)
+
+        if "json" in content_type or filename.endswith(".json"):
+            parsed = json.loads(raw_content.decode("utf-8"))
+            return json.dumps(parsed, ensure_ascii=False, indent=2)
+
         return raw_content.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise HTTPException(
             status_code=400,
-            detail="Encodage non supporté. Utilisez un fichier texte UTF-8 (.txt/.md).",
+            detail="Encodage non supporté. Utilisez un fichier UTF-8 (.txt/.md/.json/.jsonl).",
         ) from exc
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Fichier JSON invalide") from exc
+
+
+def _transform_content_to_toon(content: str) -> str:
+    paragraphs = [block.strip() for block in content.split("\n\n") if block.strip()]
+    if not paragraphs:
+        raise HTTPException(status_code=400, detail="Le contenu à transformer est vide")
+
+    transformed: List[str] = []
+    for paragraph in paragraphs:
+        lines = [line.strip() for line in paragraph.splitlines() if line.strip()]
+        transformed_lines = [f"🎬 {line.rstrip('.!?')} !" for line in lines]
+        transformed.append("\n".join(transformed_lines))
+    return "\n\n".join(transformed)
+
+
+@router.post("/api/admin/kb/ingestion/upload/parse")
+async def parse_ingestion_upload(file: UploadFile = File(...)) -> Dict[str, Any]:
+    filename = (file.filename or "document").strip()
+    content = _decode_upload_content(file, await file.read())
+    return {
+        "filename": filename,
+        "content": content,
+        "char_count": len(content),
+        "token_estimate": estimate_tokens(content),
+    }
+
+
+@router.post("/api/admin/kb/ingestion/transform")
+def transform_ingestion_content(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    mode = str(payload.get("mode") or "toon").strip().lower()
+    content = str(payload.get("content") or "")
+    if mode != "toon":
+        raise HTTPException(status_code=400, detail="Mode de transformation non supporté")
+    transformed_content = _transform_content_to_toon(content)
+    return {
+        "mode": mode,
+        "original_char_count": len(content),
+        "transformed_char_count": len(transformed_content),
+        "transformed_content": transformed_content,
+    }
+
 
 @router.post("/api/admin/kb/ingestion/preview")
 def preview_ingestion(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
