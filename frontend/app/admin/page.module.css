@@ -93,6 +93,28 @@
   gap: 16px;
 }
 
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.tabButton {
+  border: 1px solid #d5d7e5;
+  background: #fff;
+  color: #3949f0;
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tabButtonActive {
+  background: #3949f0;
+  color: #fff;
+  border-color: #3949f0;
+}
+
 .sectionHeader {
   display: flex;
   justify-content: space-between;

@@ -5,9 +5,23 @@ import { useEffect, useMemo, useState } from "react";
 import styles from "./page.module.css";
 
 const DEFAULT_BACKEND_PORT = "19081";
+const DEV_BACKEND_PORT = "8000";
 
 const formatHostname = (hostname: string) =>
   hostname.includes(":") ? `[${hostname}]` : hostname;
+
+const resolveBackendPort = (frontendPort: string) => {
+  if (process.env.NEXT_PUBLIC_BACKEND_PORT) {
+    return process.env.NEXT_PUBLIC_BACKEND_PORT;
+  }
+  if (frontendPort === "3000") {
+    return DEV_BACKEND_PORT;
+  }
+  if (frontendPort === "19080") {
+    return DEFAULT_BACKEND_PORT;
+  }
+  return DEFAULT_BACKEND_PORT;
+};
 
 const resolveApiBases = () => {
   const bases: string[] = [];
@@ -21,8 +35,7 @@ const resolveApiBases = () => {
     const { origin, protocol, hostname, port } = window.location;
     bases.push(origin);
 
-    const backendPort =
-      process.env.NEXT_PUBLIC_BACKEND_PORT ?? DEFAULT_BACKEND_PORT;
+    const backendPort = resolveBackendPort(port);
     if (backendPort && backendPort !== port) {
       bases.push(`${protocol}//${formatHostname(hostname)}:${backendPort}`);
     }
@@ -128,6 +141,15 @@ type IngestionRun = {
   }>;
 };
 
+type AdminTab = "conversations" | "leads" | "knowledge" | "ingestion";
+
+const ADMIN_TABS: Array<{ id: AdminTab; label: string }> = [
+  { id: "conversations", label: "Discussions" },
+  { id: "leads", label: "Contacts" },
+  { id: "knowledge", label: "Base de connaissances" },
+  { id: "ingestion", label: "Ingestion" },
+];
+
 export default function AdminPage() {
   const apiCandidates = useMemo(() => resolveApiBases(), []);
   const [apiBase, setApiBase] = useState<string | null>(null);
@@ -148,6 +170,7 @@ export default function AdminPage() {
   const [ingestionPreview, setIngestionPreview] = useState<IngestionPreview | null>(null);
   const [ingestionRun, setIngestionRun] = useState<IngestionRun | null>(null);
   const [ingestionFile, setIngestionFile] = useState<File | null>(null);
+  const [activeTab, setActiveTab] = useState<AdminTab>("conversations");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -168,7 +191,11 @@ export default function AdminPage() {
         }
       }
       setError(
-        "Impossible de détecter le backend. Vérifiez l'URL et la configuration.",
+        [
+          "Impossible de joindre le backend API (endpoints /api/admin).",
+          `URLs testées : ${apiCandidates.join(" · ") || "aucune"}.`,
+          "Astuce : en local, démarrez le backend sur :8000 ou définissez NEXT_PUBLIC_BACKEND_URL / NEXT_PUBLIC_BACKEND_PORT.",
+        ].join(" "),
       );
     };
 
@@ -466,6 +493,20 @@ export default function AdminPage() {
         </article>
       </section>
 
+      <nav className={styles.tabs} aria-label="Sections administrateur">
+        {ADMIN_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className={`${styles.tabButton} ${activeTab === tab.id ? styles.tabButtonActive : ""}`}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </nav>
+
+      {activeTab === "conversations" ? (
       <section className={styles.section}>
         <div className={styles.sectionHeader}>
           <h2>Discussions enregistrées</h2>
@@ -513,7 +554,9 @@ export default function AdminPage() {
           ))}
         </div>
       </section>
+      ) : null}
 
+      {activeTab === "leads" ? (
       <section className={styles.section}>
         <div className={styles.sectionHeader}>
           <h2>Fiches de contact</h2>
@@ -550,7 +593,9 @@ export default function AdminPage() {
           )}
         </div>
       </section>
+      ) : null}
 
+      {activeTab === "knowledge" ? (
       <section className={styles.section}>
         <div className={styles.sectionHeader}>
           <h2>Base de connaissances</h2>
@@ -668,6 +713,9 @@ export default function AdminPage() {
           </article>
         </div>
       </section>
+      ) : null}
+
+      {activeTab === "ingestion" ? (
       <section className={styles.section}>
         <div className={styles.sectionHeader}>
           <h2>Ingestion manuelle (Admin)</h2>
@@ -800,6 +848,7 @@ export default function AdminPage() {
           ) : null}
         </article>
       </section>
+      ) : null}
 
     </main>
   );
