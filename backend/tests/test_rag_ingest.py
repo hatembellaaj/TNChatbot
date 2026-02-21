@@ -78,3 +78,28 @@ def test_embed_texts_reports_attempt_count_when_retries_exhausted(monkeypatch):
 
     with pytest.raises(RuntimeError, match=r"after 2 attempt\(s\)"):
         ingest.embed_texts(["bonjour"])
+
+
+def test_embed_texts_batches_requests(monkeypatch):
+    calls = []
+
+    def fake_request_json(_method, _url, payload=None, timeout_seconds=0):
+        calls.append((payload, timeout_seconds))
+        inputs = payload["input"]
+        return {"data": [{"embedding": [float(index)]} for index, _ in enumerate(inputs)]}
+
+    monkeypatch.setattr(ingest, "request_json", fake_request_json)
+    monkeypatch.setenv("EMBEDDING_BATCH_SIZE", "2")
+
+    embeddings = ingest.embed_texts(["a", "b", "c", "d", "e"])
+
+    assert len(calls) == 3
+    assert [len(call[0]["input"]) for call in calls] == [2, 2, 1]
+    assert len(embeddings) == 5
+
+
+def test_embed_texts_rejects_non_positive_batch_size(monkeypatch):
+    monkeypatch.setenv("EMBEDDING_BATCH_SIZE", "0")
+
+    with pytest.raises(RuntimeError, match="EMBEDDING_BATCH_SIZE"):
+        ingest.embed_texts(["bonjour"])

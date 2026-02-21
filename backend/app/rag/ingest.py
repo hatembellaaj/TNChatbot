@@ -19,6 +19,7 @@ DEFAULT_EMBEDDING_URL = "http://localhost:8001/v1/embeddings"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_EMBEDDING_TIMEOUT_SECONDS = 30
 DEFAULT_EMBEDDING_MAX_RETRIES = 2
+DEFAULT_EMBEDDING_BATCH_SIZE = 16
 
 LOGGER = logging.getLogger(__name__)
 
@@ -103,110 +104,143 @@ def embed_texts(texts: Sequence[str]) -> List[List[float]]:
         os.getenv("EMBEDDING_TIMEOUT_SECONDS", str(DEFAULT_EMBEDDING_TIMEOUT_SECONDS))
     )
     max_retries = int(os.getenv("EMBEDDING_MAX_RETRIES", str(DEFAULT_EMBEDDING_MAX_RETRIES)))
-    payload = {
-        "model": embedding_model,
-        "input": texts,
-    }
-    response: dict | None = None
-    last_error: Exception | None = None
-    error_history: list[str] = []
+    batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", str(DEFAULT_EMBEDDING_BATCH_SIZE)))
+    if batch_size <= 0:
+        raise RuntimeError("EMBEDDING_BATCH_SIZE doit être supérieur à 0")
+
     attempts = max_retries + 1
     input_characters = sum(len(text) for text in texts)
     LOGGER.info(
-        "Starting embedding request: model=%s url=%s texts=%s chars=%s timeout=%.1fs max_retries=%s",
+        "Starting embedding request: model=%s url=%s texts=%s chars=%s timeout=%.1fs max_retries=%s batch_size=%s",
         embedding_model,
         embedding_url,
         len(texts),
         input_characters,
         timeout_seconds,
         max_retries,
+        batch_size,
     )
-    for attempt in range(1, attempts + 1):
-        request_started_at = time.perf_counter()
-        LOGGER.info("Embedding attempt %s/%s started", attempt, attempts)
-        try:
-            response = request_json("POST", embedding_url, payload, timeout_seconds=timeout_seconds)
-            elapsed = time.perf_counter() - request_started_at
-            data_count = len(response.get("data", [])) if isinstance(response, dict) else 0
-            LOGGER.info(
-                "Embedding attempt %s/%s succeeded in %.2fs (items=%s)",
-                attempt,
-                attempts,
-                elapsed,
-                data_count,
-            )
-            break
-        except HTTPError as exc:
-            elapsed = time.perf_counter() - request_started_at
-            retryable = exc.code == 429 or 500 <= exc.code < 600
-            error_body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
-            error_history.append(
-                f"attempt {attempt}/{attempts}: HTTP {exc.code} in {elapsed:.2f}s"
-                + (f" body={error_body[:300]!r}" if error_body else "")
-            )
-            LOGGER.error(
-                "Embedding attempt %s/%s failed with HTTP %s in %.2fs (retryable=%s): %s",
-                attempt,
-                attempts,
-                exc.code,
-                elapsed,
-                retryable,
-                error_body[:300] if error_body else exc,
-            )
-            if not retryable or attempt == attempts:
-                detail = (
-                    f"Embedding request failed ({exc.code})"
-                    f" for model '{embedding_model}' via '{embedding_url}'"
-                )
-                if error_body:
-                    detail = f"{detail}: {error_body}"
-                if attempts > 1:
-                    detail = f"{detail} after {attempt} attempt(s)"
-                if error_history:
-                    detail = f"{detail}. Attempts: {' | '.join(error_history)}"
-                raise RuntimeError(detail) from exc
-            last_error = exc
-        except (URLError, TimeoutError) as exc:
-            elapsed = time.perf_counter() - request_started_at
-            error_history.append(f"attempt {attempt}/{attempts}: {type(exc).__name__} in {elapsed:.2f}s: {exc}")
-            LOGGER.error(
-                "Embedding attempt %s/%s failed with %s in %.2fs: %s",
-                attempt,
-                attempts,
-                type(exc).__name__,
-                elapsed,
-                exc,
-            )
-            if attempt == attempts:
-                detail = (
-                    f"Embedding request failed for model '{embedding_model}' via '{embedding_url}': {exc}"
-                )
-                if attempts > 1:
-                    detail = f"{detail} after {attempt} attempt(s)"
-                if error_history:
-                    detail = f"{detail}. Attempts: {' | '.join(error_history)}"
-                raise RuntimeError(detail) from exc
-            last_error = exc
-
-        wait_seconds = min(0.5 * attempt, 2.0)
-        LOGGER.warning(
-            "Embedding request attempt %s/%s failed: %s; retrying in %.1fs",
-            attempt,
-            attempts,
-            last_error,
-            wait_seconds,
-        )
-        time.sleep(wait_seconds)
-
-    if response is None:
-        raise RuntimeError("Embedding request failed before receiving a response")
-
-    data = response.get("data", [])
     embeddings: List[List[float]] = []
-    for item in data:
-        embeddings.append(item.get("embedding", []))
+    total_batches = max(1, (len(texts) + batch_size - 1) // batch_size)
+
+    for batch_index, batch_start in enumerate(range(0, len(texts), batch_size), start=1):
+        batch_texts = texts[batch_start : batch_start + batch_size]
+        payload = {
+            "model": embedding_model,
+            "input": batch_texts,
+        }
+        response: dict | None = None
+        last_error: Exception | None = None
+        error_history: list[str] = []
+
+        LOGGER.info(
+            "Embedding batch %s/%s started (items=%s)",
+            batch_index,
+            total_batches,
+            len(batch_texts),
+        )
+        for attempt in range(1, attempts + 1):
+            request_started_at = time.perf_counter()
+            LOGGER.info("Embedding attempt %s/%s started (batch=%s/%s)", attempt, attempts, batch_index, total_batches)
+            try:
+                response = request_json("POST", embedding_url, payload, timeout_seconds=timeout_seconds)
+                elapsed = time.perf_counter() - request_started_at
+                data_count = len(response.get("data", [])) if isinstance(response, dict) else 0
+                LOGGER.info(
+                    "Embedding attempt %s/%s succeeded in %.2fs (batch=%s/%s, items=%s)",
+                    attempt,
+                    attempts,
+                    elapsed,
+                    batch_index,
+                    total_batches,
+                    data_count,
+                )
+                break
+            except HTTPError as exc:
+                elapsed = time.perf_counter() - request_started_at
+                retryable = exc.code == 429 or 500 <= exc.code < 600
+                error_body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+                error_history.append(
+                    f"attempt {attempt}/{attempts}: HTTP {exc.code} in {elapsed:.2f}s"
+                    + (f" body={error_body[:300]!r}" if error_body else "")
+                )
+                LOGGER.error(
+                    "Embedding attempt %s/%s failed with HTTP %s in %.2fs (batch=%s/%s retryable=%s): %s",
+                    attempt,
+                    attempts,
+                    exc.code,
+                    elapsed,
+                    batch_index,
+                    total_batches,
+                    retryable,
+                    error_body[:300] if error_body else exc,
+                )
+                if not retryable or attempt == attempts:
+                    detail = (
+                        f"Embedding request failed ({exc.code})"
+                        f" for model '{embedding_model}' via '{embedding_url}'"
+                        f" on batch {batch_index}/{total_batches}"
+                    )
+                    if error_body:
+                        detail = f"{detail}: {error_body}"
+                    if attempts > 1:
+                        detail = f"{detail} after {attempt} attempt(s)"
+                    if error_history:
+                        detail = f"{detail}. Attempts: {' | '.join(error_history)}"
+                    raise RuntimeError(detail) from exc
+                last_error = exc
+            except (URLError, TimeoutError) as exc:
+                elapsed = time.perf_counter() - request_started_at
+                error_history.append(
+                    f"attempt {attempt}/{attempts}: {type(exc).__name__} in {elapsed:.2f}s: {exc}"
+                )
+                LOGGER.error(
+                    "Embedding attempt %s/%s failed with %s in %.2fs (batch=%s/%s): %s",
+                    attempt,
+                    attempts,
+                    type(exc).__name__,
+                    elapsed,
+                    batch_index,
+                    total_batches,
+                    exc,
+                )
+                if attempt == attempts:
+                    detail = (
+                        f"Embedding request failed for model '{embedding_model}' via '{embedding_url}': {exc}"
+                        f" on batch {batch_index}/{total_batches}"
+                    )
+                    if attempts > 1:
+                        detail = f"{detail} after {attempt} attempt(s)"
+                    if error_history:
+                        detail = f"{detail}. Attempts: {' | '.join(error_history)}"
+                    raise RuntimeError(detail) from exc
+                last_error = exc
+
+            wait_seconds = min(0.5 * attempt, 2.0)
+            LOGGER.warning(
+                "Embedding request attempt %s/%s failed on batch %s/%s: %s; retrying in %.1fs",
+                attempt,
+                attempts,
+                batch_index,
+                total_batches,
+                last_error,
+                wait_seconds,
+            )
+            time.sleep(wait_seconds)
+
+        if response is None:
+            raise RuntimeError("Embedding request failed before receiving a response")
+
+        data = response.get("data", [])
+        if len(data) != len(batch_texts):
+            raise RuntimeError("Embedding response size mismatch")
+
+        for item in data:
+            embeddings.append(item.get("embedding", []))
+
     if len(embeddings) != len(texts):
         raise RuntimeError("Embedding response size mismatch")
+
     LOGGER.info(
         "Embedding completed successfully: vectors=%s dimension=%s",
         len(embeddings),
