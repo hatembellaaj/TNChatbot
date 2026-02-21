@@ -140,6 +140,21 @@ type IngestionRun = {
   }>;
 };
 
+type ToonTransformResponse = {
+  mode: "toon";
+  original_char_count: number;
+  transformed_char_count: number;
+  transformed_content: string;
+};
+
+type TransformDecision = "idle" | "pending" | "accepted" | "rejected";
+
+type IngestionLogEntry = {
+  timestamp: string;
+  event: string;
+  data: Record<string, unknown>;
+};
+
 type AdminTab = "conversations" | "leads" | "knowledge" | "ingestion";
 
 const ADMIN_TABS: Array<{ id: AdminTab; label: string }> = [
@@ -169,6 +184,10 @@ export default function AdminPage() {
   const [ingestionPreview, setIngestionPreview] = useState<IngestionPreview | null>(null);
   const [ingestionRun, setIngestionRun] = useState<IngestionRun | null>(null);
   const [ingestionFile, setIngestionFile] = useState<File | null>(null);
+  const [toonCandidate, setToonCandidate] = useState("");
+  const [transformDecision, setTransformDecision] = useState<TransformDecision>("idle");
+  const [ingestionLogs, setIngestionLogs] = useState<IngestionLogEntry[]>([]);
+  const [streamRunning, setStreamRunning] = useState(false);
   const [activeTab, setActiveTab] = useState<AdminTab>("conversations");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -425,6 +444,168 @@ export default function AdminPage() {
       setError(message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const parseIngestionUpload = async () => {
+    if (!apiBase || !password || !ingestionFile) {
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", ingestionFile);
+      const response = await fetch(`${apiBase}/api/admin/kb/ingestion/upload/parse`, {
+        method: "POST",
+        headers: { "X-Admin-Password": password },
+        body: formData,
+      });
+      if (!response.ok) {
+        throw new Error("Lecture du fichier impossible.");
+      }
+      const payload = (await response.json()) as { content: string };
+      setIngestionContent(payload.content || "");
+      setToonCandidate("");
+      setTransformDecision("idle");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Erreur inconnue pendant la lecture du fichier.";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runToonTransform = async () => {
+    if (!apiBase || !password || !ingestionContent.trim()) {
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/admin/kb/ingestion/transform`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Password": password,
+        },
+        body: JSON.stringify({
+          mode: "toon",
+          content: ingestionContent,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error("Transformation en toon impossible.");
+      }
+      const payload = (await response.json()) as ToonTransformResponse;
+      setToonCandidate(payload.transformed_content);
+      setTransformDecision("pending");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Erreur inconnue pendant la transformation.";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const acceptToonTransform = () => {
+    if (!toonCandidate) {
+      return;
+    }
+    setIngestionContent(toonCandidate);
+    setTransformDecision("accepted");
+  };
+
+  const rejectToonTransform = () => {
+    setTransformDecision("rejected");
+  };
+
+  const runIngestionWithLogs = async () => {
+    if (!apiBase || !password || !ingestionContent.trim()) {
+      return;
+    }
+
+    setLoading(true);
+    setStreamRunning(true);
+    setError(null);
+    setIngestionLogs([]);
+    setIngestionRun(null);
+
+    const appendLog = (event: string, data: Record<string, unknown>) => {
+      setIngestionLogs((current) => [
+        ...current,
+        {
+          timestamp: new Date().toISOString(),
+          event,
+          data,
+        },
+      ]);
+    };
+
+    try {
+      const response = await fetch(`${apiBase}/api/admin/kb/ingestion/run/stream`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Password": password,
+        },
+        body: JSON.stringify({
+          title: ingestionTitle,
+          source_uri: ingestionSourceUri,
+          content: ingestionContent,
+          chunk_size: Number(ingestionChunkSize),
+          overlap: Number(ingestionOverlap),
+        }),
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error("Lancement ingestion stream impossible.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffered = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) {
+          break;
+        }
+        buffered += decoder.decode(value, { stream: true });
+        const lines = buffered.split("\n");
+        buffered = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.trim()) {
+            continue;
+          }
+          const parsed = JSON.parse(line) as {
+            event: string;
+            data: Record<string, unknown>;
+          };
+
+          appendLog(parsed.event, parsed.data || {});
+
+          if (parsed.event === "result") {
+            setIngestionRun(parsed.data as unknown as IngestionRun);
+            await fetchAdminData();
+          }
+
+          if (parsed.event === "error") {
+            throw new Error(String(parsed.data?.detail || "Erreur inconnue pendant l'ingestion."));
+          }
+        }
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Erreur inconnue pendant l'ingestion stream.";
+      setError(message);
+      appendLog("client_error", { detail: message });
+    } finally {
+      setLoading(false);
+      setStreamRunning(false);
     }
   };
 
@@ -770,10 +951,10 @@ export default function AdminPage() {
             </label>
           </div>
           <label className={styles.tokenField}>
-            <span>Uploader un fichier (.txt, .md)</span>
+            <span>Uploader un fichier (.txt, .md, .pdf, .json, .jsonl)</span>
             <input
               type="file"
-              accept=".txt,.md,text/plain,text/markdown"
+              accept=".txt,.md,.pdf,.json,.jsonl,text/plain,text/markdown,application/pdf,application/json"
               onChange={(event) => {
                 const file = event.target.files?.[0] ?? null;
                 setIngestionFile(file);
@@ -789,7 +970,11 @@ export default function AdminPage() {
             <textarea
               className={styles.textarea}
               value={ingestionContent}
-              onChange={(event) => setIngestionContent(event.target.value)}
+              onChange={(event) => {
+                setIngestionContent(event.target.value);
+                setToonCandidate("");
+                setTransformDecision("idle");
+              }}
               placeholder="Collez votre document ici..."
             />
           </label>
@@ -797,8 +982,24 @@ export default function AdminPage() {
             <button
               type="button"
               className={styles.primaryButton}
-              onClick={runIngestionPreview}
+              onClick={parseIngestionUpload}
+              disabled={!isAuthenticated || loading || !ingestionFile || transformDecision === "pending"}
+            >
+              Charger le fichier
+            </button>
+            <button
+              type="button"
+              className={styles.primaryButton}
+              onClick={runToonTransform}
               disabled={!isAuthenticated || loading || !ingestionContent.trim()}
+            >
+              Transformer en toon
+            </button>
+            <button
+              type="button"
+              className={styles.primaryButton}
+              onClick={runIngestionPreview}
+              disabled={!isAuthenticated || loading || !ingestionContent.trim() || transformDecision === "pending"}
             >
               Prévisualiser pipeline
             </button>
@@ -806,19 +1007,46 @@ export default function AdminPage() {
               type="button"
               className={styles.primaryButton}
               onClick={runIngestion}
-              disabled={!isAuthenticated || loading || (!ingestionContent.trim() && !ingestionFile)}
+              disabled={!isAuthenticated || loading || (!ingestionContent.trim() && !ingestionFile) || transformDecision === "pending"}
             >
               Lancer ingestion
             </button>
             <button
               type="button"
               className={styles.primaryButton}
+              onClick={runIngestionWithLogs}
+              disabled={!isAuthenticated || loading || !ingestionContent.trim() || transformDecision === "pending"}
+            >
+              Lancer ingestion (logs temps réel)
+            </button>
+            <button
+              type="button"
+              className={styles.primaryButton}
               onClick={runIngestionFromUpload}
-              disabled={!isAuthenticated || loading || !ingestionFile}
+              disabled={!isAuthenticated || loading || !ingestionFile || transformDecision === "pending"}
             >
               Uploader et ingérer
             </button>
           </div>
+
+          {transformDecision === "pending" ? (
+            <div className={styles.card}>
+              <h3>Validation transformation toon</h3>
+              <p>Validez ou refusez le résultat avant de continuer l'ingestion.</p>
+              <label className={styles.tokenField}>
+                <span>Résultat transformé</span>
+                <textarea className={styles.textarea} value={toonCandidate} readOnly />
+              </label>
+              <div className={styles.actions}>
+                <button type="button" className={styles.primaryButton} onClick={acceptToonTransform}>
+                  Valider la transformation
+                </button>
+                <button type="button" className={styles.primaryButton} onClick={rejectToonTransform}>
+                  Refuser la transformation
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           {ingestionPreview ? (
             <div className={styles.ingestionGrid}>
@@ -834,6 +1062,27 @@ export default function AdminPage() {
                 <h3>Embedding</h3>
                 <p>Dimension: {ingestionPreview.embeddings.dimension || "—"}</p>
               </div>
+            </div>
+          ) : null}
+
+          {ingestionLogs.length > 0 ? (
+            <div className={styles.leadsTable}>
+              <div className={styles.ingestionTableHeader}>
+                <span>Horodatage</span>
+                <span>Événement</span>
+                <span>Détails</span>
+                <span>Statut</span>
+                <span>—</span>
+              </div>
+              {ingestionLogs.map((log, index) => (
+                <div key={`${log.timestamp}-${index}`} className={styles.ingestionTableRow}>
+                  <span>{new Date(log.timestamp).toLocaleTimeString("fr-FR")}</span>
+                  <span>{log.event}</span>
+                  <span>{JSON.stringify(log.data)}</span>
+                  <span>{log.event === "error" || log.event === "client_error" ? "❌" : "✅"}</span>
+                  <span>{streamRunning && index === ingestionLogs.length - 1 ? "en cours..." : ""}</span>
+                </div>
+              ))}
             </div>
           ) : null}
 
