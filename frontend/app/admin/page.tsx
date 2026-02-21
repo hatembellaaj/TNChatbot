@@ -857,7 +857,7 @@ export default function AdminPage() {
             {kbDocuments.length} documents · {kbChunks.length} chunks
           </span>
         </div>
-        <div className={styles.kbGrid}>
+        <div className={styles.kbStack}>
           <article className={styles.card}>
             <header className={styles.kbHeader}>
               <h3>Documents ingérés</h3>

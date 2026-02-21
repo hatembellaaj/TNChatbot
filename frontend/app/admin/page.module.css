@@ -230,6 +230,12 @@
   gap: 16px;
 }
 
+.kbStack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .kbHeader {
   display: flex;
   justify-content: space-between;
