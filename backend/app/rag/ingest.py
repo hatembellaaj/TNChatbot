@@ -97,7 +97,7 @@ def embed_texts(texts: Sequence[str]) -> List[List[float]]:
     }
     try:
         response = request_json("POST", embedding_url, payload)
-    except (HTTPError, URLError) as exc:
+    except (HTTPError, URLError, TimeoutError) as exc:
         raise RuntimeError("Embedding request failed") from exc
 
     data = response.get("data", [])

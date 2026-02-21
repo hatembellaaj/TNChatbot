@@ -645,7 +645,13 @@ def preview_ingestion(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     embeddings: List[List[float]] = []
     embedding_dimension = 0
     if include_embeddings and chunks:
-        embeddings = embed_texts(chunks)
+        try:
+            embeddings = embed_texts(chunks)
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Impossible de générer les embeddings pour la prévisualisation",
+            ) from exc
         embedding_dimension = len(embeddings[0]) if embeddings and embeddings[0] else 0
         for index, values in enumerate(embeddings):
             preview_chunks[index]["embedding_dimension"] = len(values)
