@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import styles from "./page.module.css";
 
@@ -33,12 +33,11 @@ const resolveApiBases = () => {
   }
   if (typeof window !== "undefined") {
     const { origin, protocol, hostname, port } = window.location;
-    bases.push(origin);
-
     const backendPort = resolveBackendPort(port);
     if (backendPort && backendPort !== port) {
       bases.push(`${protocol}//${formatHostname(hostname)}:${backendPort}`);
     }
+    bases.push(origin);
   }
   return Array.from(new Set(bases));
 };
@@ -173,25 +172,41 @@ export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<AdminTab>("conversations");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const hasDiscoveredBackend = useRef(false);
 
   useEffect(() => {
+    if (hasDiscoveredBackend.current) {
+      return;
+    }
+    hasDiscoveredBackend.current = true;
+
     const discover = async () => {
+      const failedCandidates: string[] = [];
       for (const candidate of apiCandidates) {
         try {
           const response = await fetch(`${candidate}/health`);
           if (response.ok) {
             setApiBase(candidate);
+            setError(null);
             return;
           }
-        } catch (candidateError) {
-          console.warn(
-            `[TNChatbot] Admin health check failed for ${candidate}.`,
-            candidateError,
-          );
+          failedCandidates.push(`${candidate} (HTTP ${response.status})`);
+        } catch {
+          failedCandidates.push(`${candidate} (injoignable)`);
         }
       }
+
+      if (failedCandidates.length > 0) {
+        console.info(
+          `[TNChatbot] Admin backend discovery failed: ${failedCandidates.join(" | ")}`,
+        );
+      }
       setError(
-        "Impossible de détecter le backend. Vérifiez l'URL et la configuration.",
+        [
+          "Impossible de joindre le backend API (endpoints /api/admin).",
+          `URLs testées : ${failedCandidates.join(" · ") || "aucune"}.`,
+          "Astuce : en local, démarrez le backend sur :8000 ou définissez NEXT_PUBLIC_BACKEND_URL / NEXT_PUBLIC_BACKEND_PORT.",
+        ].join(" "),
       );
     };
 
