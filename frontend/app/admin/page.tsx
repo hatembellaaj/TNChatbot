@@ -1155,6 +1155,27 @@ export default function AdminPage() {
             </div>
           ) : null}
 
+          {ingestionLogs.length > 0 ? (
+            <div className={styles.leadsTable}>
+              <div className={styles.ingestionTableHeader}>
+                <span>Horodatage</span>
+                <span>Événement</span>
+                <span>Détails</span>
+                <span>Statut</span>
+                <span>—</span>
+              </div>
+              {ingestionLogs.map((log, index) => (
+                <div key={`${log.timestamp}-${index}`} className={styles.ingestionTableRow}>
+                  <span>{new Date(log.timestamp).toLocaleTimeString("fr-FR")}</span>
+                  <span>{log.event}</span>
+                  <span>{JSON.stringify(log.data)}</span>
+                  <span>{log.event === "error" || log.event === "client_error" ? "❌" : "✅"}</span>
+                  <span>{streamRunning && index === ingestionLogs.length - 1 ? "en cours..." : ""}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
           {ingestionRun ? (
             <div className={styles.leadsTable}>
               <div className={styles.ingestionTableHeader}>
