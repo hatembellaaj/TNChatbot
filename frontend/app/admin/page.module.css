@@ -129,6 +129,44 @@
   gap: 16px;
 }
 
+.conversationList {
+  display: grid;
+  gap: 10px;
+}
+
+.conversationListHeader,
+.conversationListRow {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 0.6fr 1fr 0.7fr;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.conversationListHeader {
+  font-weight: 600;
+  color: #5c5f7a;
+}
+
+.conversationListRow {
+  padding: 10px 0;
+  border-top: 1px solid #eef0f8;
+}
+
+.conversationDetailMessages {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.conversationDetailMessage {
+  border: 1px solid #eef0f8;
+  border-radius: 10px;
+  padding: 10px;
+  background: #fff;
+}
+
 .conversation {
   background: #fff;
   border-radius: 16px;
@@ -361,6 +399,11 @@
 
   .kbTableHeader,
   .kbTableRow {
+    grid-template-columns: 1fr;
+  }
+
+  .conversationListHeader,
+  .conversationListRow {
     grid-template-columns: 1fr;
   }
 

@@ -175,6 +175,7 @@ export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [kbDocuments, setKbDocuments] = useState<KbDocument[]>([]);
   const [kbChunks, setKbChunks] = useState<KbChunk[]>([]);
@@ -199,6 +200,11 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const hasDiscoveredBackend = useRef(false);
+
+  const selectedConversation = useMemo(
+    () => conversations.find((conversation) => conversation.session_id === selectedConversationId) ?? null,
+    [conversations, selectedConversationId],
+  );
 
   const selectedDocument = useMemo(
     () => kbDocuments.find((doc) => doc.id === selectedDocumentId) ?? null,
@@ -285,6 +291,11 @@ export default function AdminPage() {
 
     setOverview(overviewPayload);
     setConversations(conversationsPayload.items ?? []);
+    setSelectedConversationId((current) =>
+      (conversationsPayload.items ?? []).some((conversation) => conversation.session_id === current)
+        ? current
+        : null,
+    );
     setLeads(leadsPayload.items ?? []);
     setKbDocuments(kbDocsPayload.items ?? []);
     setKbChunks(kbChunksPayload.items ?? []);
@@ -766,28 +777,53 @@ export default function AdminPage() {
           <h2>Discussions enregistrées</h2>
           <span>{conversations.length} sessions chargées</span>
         </div>
-        <div className={styles.conversationGrid}>
-          {conversations.map((conversation) => (
-            <article key={conversation.session_id} className={styles.conversation}>
-              <header>
-                <div>
-                  <h3>Session {conversation.session_id.slice(0, 8)}</h3>
-                  <p>Étape : {conversation.step}</p>
+        <article className={styles.card}>
+          <div className={styles.conversationList}>
+            <div className={styles.conversationListHeader}>
+              <span>Session</span>
+              <span>Étape</span>
+              <span>Messages</span>
+              <span>Création</span>
+              <span>Action</span>
+            </div>
+            {conversations.length === 0 ? (
+              <div className={styles.emptyState}>
+                Aucune discussion enregistrée pour le moment.
+              </div>
+            ) : (
+              conversations.map((conversation) => (
+                <div key={conversation.session_id} className={styles.conversationListRow}>
+                  <span>Session {conversation.session_id.slice(0, 8)}</span>
+                  <span>{conversation.step}</span>
+                  <span>{conversation.messages.length}</span>
+                  <span>
+                    {conversation.created_at
+                      ? new Date(conversation.created_at).toLocaleString("fr-FR")
+                      : "Date inconnue"}
+                  </span>
+                  <button
+                    type="button"
+                    className={styles.inlineButton}
+                    onClick={() => setSelectedConversationId(conversation.session_id)}
+                  >
+                    Consulter
+                  </button>
                 </div>
-                <span>
-                  {conversation.created_at
-                    ? new Date(conversation.created_at).toLocaleString("fr-FR")
-                    : "Date inconnue"}
-                </span>
-              </header>
-              <ul>
-                {conversation.messages.length === 0 ? (
-                  <li className={styles.emptyState}>
-                    Aucun message enregistré pour cette session.
-                  </li>
+              ))
+            )}
+          </div>
+          {selectedConversation ? (
+            <div className={styles.detailPanel}>
+              <h4>Détail de la discussion</h4>
+              <p><strong>Session :</strong> {selectedConversation.session_id}</p>
+              <p><strong>Étape :</strong> {selectedConversation.step}</p>
+              <p><strong>Messages :</strong> {selectedConversation.messages.length}</p>
+              <div className={styles.conversationDetailMessages}>
+                {selectedConversation.messages.length === 0 ? (
+                  <p className={styles.emptyState}>Aucun message enregistré pour cette session.</p>
                 ) : (
-                  conversation.messages.map((message, index) => (
-                    <li key={`${conversation.session_id}-${index}`}>
+                  selectedConversation.messages.map((message, index) => (
+                    <article key={`${selectedConversation.session_id}-${index}`} className={styles.conversationDetailMessage}>
                       <div className={styles.messageHeader}>
                         <span className={styles.role}>{message.role}</span>
                         <span className={styles.step}>
@@ -800,13 +836,13 @@ export default function AdminPage() {
                         </span>
                       </div>
                       <p>{message.content}</p>
-                    </li>
+                    </article>
                   ))
                 )}
-              </ul>
-            </article>
-          ))}
-        </div>
+              </div>
+            </div>
+          ) : null}
+        </article>
       </section>
       ) : null}
 
