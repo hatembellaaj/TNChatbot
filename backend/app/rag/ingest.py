@@ -109,15 +109,51 @@ def embed_texts(texts: Sequence[str]) -> List[List[float]]:
     }
     response: dict | None = None
     last_error: Exception | None = None
+    error_history: list[str] = []
     attempts = max_retries + 1
+    input_characters = sum(len(text) for text in texts)
+    LOGGER.info(
+        "Starting embedding request: model=%s url=%s texts=%s chars=%s timeout=%.1fs max_retries=%s",
+        embedding_model,
+        embedding_url,
+        len(texts),
+        input_characters,
+        timeout_seconds,
+        max_retries,
+    )
     for attempt in range(1, attempts + 1):
+        request_started_at = time.perf_counter()
+        LOGGER.info("Embedding attempt %s/%s started", attempt, attempts)
         try:
             response = request_json("POST", embedding_url, payload, timeout_seconds=timeout_seconds)
+            elapsed = time.perf_counter() - request_started_at
+            data_count = len(response.get("data", [])) if isinstance(response, dict) else 0
+            LOGGER.info(
+                "Embedding attempt %s/%s succeeded in %.2fs (items=%s)",
+                attempt,
+                attempts,
+                elapsed,
+                data_count,
+            )
             break
         except HTTPError as exc:
+            elapsed = time.perf_counter() - request_started_at
             retryable = exc.code == 429 or 500 <= exc.code < 600
+            error_body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+            error_history.append(
+                f"attempt {attempt}/{attempts}: HTTP {exc.code} in {elapsed:.2f}s"
+                + (f" body={error_body[:300]!r}" if error_body else "")
+            )
+            LOGGER.error(
+                "Embedding attempt %s/%s failed with HTTP %s in %.2fs (retryable=%s): %s",
+                attempt,
+                attempts,
+                exc.code,
+                elapsed,
+                retryable,
+                error_body[:300] if error_body else exc,
+            )
             if not retryable or attempt == attempts:
-                error_body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
                 detail = (
                     f"Embedding request failed ({exc.code})"
                     f" for model '{embedding_model}' via '{embedding_url}'"
@@ -126,15 +162,29 @@ def embed_texts(texts: Sequence[str]) -> List[List[float]]:
                     detail = f"{detail}: {error_body}"
                 if attempts > 1:
                     detail = f"{detail} after {attempt} attempt(s)"
+                if error_history:
+                    detail = f"{detail}. Attempts: {' | '.join(error_history)}"
                 raise RuntimeError(detail) from exc
             last_error = exc
         except (URLError, TimeoutError) as exc:
+            elapsed = time.perf_counter() - request_started_at
+            error_history.append(f"attempt {attempt}/{attempts}: {type(exc).__name__} in {elapsed:.2f}s: {exc}")
+            LOGGER.error(
+                "Embedding attempt %s/%s failed with %s in %.2fs: %s",
+                attempt,
+                attempts,
+                type(exc).__name__,
+                elapsed,
+                exc,
+            )
             if attempt == attempts:
                 detail = (
                     f"Embedding request failed for model '{embedding_model}' via '{embedding_url}': {exc}"
                 )
                 if attempts > 1:
                     detail = f"{detail} after {attempt} attempt(s)"
+                if error_history:
+                    detail = f"{detail}. Attempts: {' | '.join(error_history)}"
                 raise RuntimeError(detail) from exc
             last_error = exc
 
@@ -157,6 +207,11 @@ def embed_texts(texts: Sequence[str]) -> List[List[float]]:
         embeddings.append(item.get("embedding", []))
     if len(embeddings) != len(texts):
         raise RuntimeError("Embedding response size mismatch")
+    LOGGER.info(
+        "Embedding completed successfully: vectors=%s dimension=%s",
+        len(embeddings),
+        len(embeddings[0]) if embeddings else 0,
+    )
     return embeddings
 
 
