@@ -2,9 +2,11 @@ import csv
 import io
 import json
 import os
+import queue
+import threading
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Callable, Dict, Iterable, List
 
 from fastapi import APIRouter, Body, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
@@ -57,6 +59,8 @@ def load_admin_config(keys: Iterable[str] = ADMIN_CONFIG_KEYS) -> Dict[str, Any]
     keys_list = list(keys)
     if not keys_list:
         return config
+    if report:
+        report("database_write_started", {})
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -69,6 +73,8 @@ def load_admin_config(keys: Iterable[str] = ADMIN_CONFIG_KEYS) -> Dict[str, Any]
 
 
 def _upsert_config(key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    if report:
+        report("database_write_started", {})
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -84,6 +90,8 @@ def _upsert_config(key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _get_config(key: str) -> Dict[str, Any]:
+    if report:
+        report("database_write_started", {})
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT value FROM admin_config WHERE key = %s", (key,))
@@ -135,6 +143,8 @@ def put_sectors(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
 
 @router.get("/api/admin/leads")
 def get_leads(format: str | None = Query(default=None)) -> Any:
+    if report:
+        report("database_write_started", {})
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -202,6 +212,8 @@ def get_leads(format: str | None = Query(default=None)) -> Any:
 
 @router.get("/api/admin/overview")
 def get_overview() -> Dict[str, Any]:
+    if report:
+        report("database_write_started", {})
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM chat_sessions")
@@ -229,6 +241,8 @@ def get_conversations(
     limit: int = Query(default=20, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> Dict[str, Any]:
+    if report:
+        report("database_write_started", {})
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM chat_sessions")
@@ -287,6 +301,8 @@ def get_kb_documents(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> Dict[str, Any]:
+    if report:
+        report("database_write_started", {})
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM kb_documents")
@@ -349,6 +365,8 @@ def get_kb_chunks(
         params.append(f"%{query}%")
 
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+    if report:
+        report("database_write_started", {})
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -423,18 +441,29 @@ def _ingest_document(
     chunk_size: int,
     overlap: int,
     source_type: str = "admin",
+    report: Callable[[str, Dict[str, Any]], None] | None = None,
 ) -> Dict[str, Any]:
+    if report:
+        report("chunking_started", {"chunk_size": chunk_size, "overlap": overlap})
     chunks = chunk_text(content, chunk_size, overlap)
     if not chunks:
         raise HTTPException(status_code=400, detail="Aucun chunk généré")
 
+    if report:
+        report("chunking_completed", {"chunks": len(chunks)})
+        report("embedding_started", {"chunks": len(chunks)})
     embeddings = embed_texts(chunks)
     if not embeddings or not embeddings[0]:
         raise HTTPException(status_code=502, detail="Les embeddings n'ont pas pu être générés")
 
+    if report:
+        report("embedding_completed", {"dimension": len(embeddings[0]), "count": len(embeddings)})
+        report("qdrant_collection_prepare", {"dimension": len(embeddings[0])})
     ensure_qdrant_collection(len(embeddings[0]))
     intent = derive_intent_from_path(Path(f"{title}.txt"))
 
+    if report:
+        report("database_write_started", {})
     with get_connection() as conn:
         run_id = conn.execute(
             "INSERT INTO kb_ingestion_runs (status) VALUES ('running') RETURNING id"
@@ -484,7 +513,12 @@ def _ingest_document(
                 }
             )
 
+        if report:
+            report("database_chunks_inserted", {"rows": len(rows)})
+            report("qdrant_upsert_started", {"points": len(points)})
         upsert_qdrant_points(points)
+        if report:
+            report("qdrant_upsert_completed", {"points": len(points)})
         conn.execute(
             "UPDATE kb_documents SET status = %s, updated_at = NOW() WHERE id = %s",
             ("ready", doc_id),
@@ -501,6 +535,9 @@ def _ingest_document(
                 run_id,
             ),
         )
+
+    if report:
+        report("ingestion_completed", {"run_id": str(run_id), "document_id": str(doc_id), "chunks": len(rows)})
 
     return {
         "run_id": str(run_id),
@@ -673,6 +710,56 @@ def run_ingestion(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         overlap=overlap,
         source_type="admin",
     )
+
+
+
+
+@router.post("/api/admin/kb/ingestion/run/stream")
+def run_ingestion_stream(payload: Dict[str, Any] = Body(...)) -> StreamingResponse:
+    title = str(payload.get("title") or "").strip() or "Document"
+    content = str(payload.get("content") or "")
+    source_uri = str(payload.get("source_uri") or title)
+    chunk_size, overlap = _normalize_chunk_params(payload.get("chunk_size"), payload.get("overlap"))
+
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="Le contenu du document est vide")
+
+    def event_stream():
+        events: queue.Queue[bytes | None] = queue.Queue()
+
+        def push(event: str, data: Dict[str, Any]) -> None:
+            message = {"event": event, "data": data}
+            events.put((json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8"))
+
+        def worker() -> None:
+            try:
+                push("ingestion_started", {"title": title, "source_uri": source_uri})
+                result = _ingest_document(
+                    title=title,
+                    source_uri=source_uri,
+                    content=content,
+                    chunk_size=chunk_size,
+                    overlap=overlap,
+                    source_type="admin",
+                    report=push,
+                )
+                push("result", result)
+            except HTTPException as exc:
+                push("error", {"detail": exc.detail, "status_code": exc.status_code})
+            except Exception as exc:  # pragma: no cover
+                push("error", {"detail": str(exc), "status_code": 500})
+            finally:
+                events.put(None)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+        while True:
+            item = events.get()
+            if item is None:
+                break
+            yield item
+
+    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
 
 
 @router.post("/api/admin/kb/ingestion/upload")

@@ -149,6 +149,12 @@ type ToonTransformResponse = {
 
 type TransformDecision = "idle" | "pending" | "accepted" | "rejected";
 
+type IngestionLogEntry = {
+  timestamp: string;
+  event: string;
+  data: Record<string, unknown>;
+};
+
 type AdminTab = "conversations" | "leads" | "knowledge" | "ingestion";
 
 const ADMIN_TABS: Array<{ id: AdminTab; label: string }> = [
@@ -180,6 +186,8 @@ export default function AdminPage() {
   const [ingestionFile, setIngestionFile] = useState<File | null>(null);
   const [toonCandidate, setToonCandidate] = useState("");
   const [transformDecision, setTransformDecision] = useState<TransformDecision>("idle");
+  const [ingestionLogs, setIngestionLogs] = useState<IngestionLogEntry[]>([]);
+  const [streamRunning, setStreamRunning] = useState(false);
   const [activeTab, setActiveTab] = useState<AdminTab>("conversations");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -512,6 +520,93 @@ export default function AdminPage() {
 
   const rejectToonTransform = () => {
     setTransformDecision("rejected");
+  };
+
+  const runIngestionWithLogs = async () => {
+    if (!apiBase || !password || !ingestionContent.trim()) {
+      return;
+    }
+
+    setLoading(true);
+    setStreamRunning(true);
+    setError(null);
+    setIngestionLogs([]);
+    setIngestionRun(null);
+
+    const appendLog = (event: string, data: Record<string, unknown>) => {
+      setIngestionLogs((current) => [
+        ...current,
+        {
+          timestamp: new Date().toISOString(),
+          event,
+          data,
+        },
+      ]);
+    };
+
+    try {
+      const response = await fetch(`${apiBase}/api/admin/kb/ingestion/run/stream`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Password": password,
+        },
+        body: JSON.stringify({
+          title: ingestionTitle,
+          source_uri: ingestionSourceUri,
+          content: ingestionContent,
+          chunk_size: Number(ingestionChunkSize),
+          overlap: Number(ingestionOverlap),
+        }),
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error("Lancement ingestion stream impossible.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffered = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) {
+          break;
+        }
+        buffered += decoder.decode(value, { stream: true });
+        const lines = buffered.split("\n");
+        buffered = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.trim()) {
+            continue;
+          }
+          const parsed = JSON.parse(line) as {
+            event: string;
+            data: Record<string, unknown>;
+          };
+
+          appendLog(parsed.event, parsed.data || {});
+
+          if (parsed.event === "result") {
+            setIngestionRun(parsed.data as unknown as IngestionRun);
+            await fetchAdminData();
+          }
+
+          if (parsed.event === "error") {
+            throw new Error(String(parsed.data?.detail || "Erreur inconnue pendant l'ingestion."));
+          }
+        }
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Erreur inconnue pendant l'ingestion stream.";
+      setError(message);
+      appendLog("client_error", { detail: message });
+    } finally {
+      setLoading(false);
+      setStreamRunning(false);
+    }
   };
 
   const refreshData = async () => {
@@ -919,6 +1014,14 @@ export default function AdminPage() {
             <button
               type="button"
               className={styles.primaryButton}
+              onClick={runIngestionWithLogs}
+              disabled={!isAuthenticated || loading || !ingestionContent.trim() || transformDecision === "pending"}
+            >
+              Lancer ingestion (logs temps réel)
+            </button>
+            <button
+              type="button"
+              className={styles.primaryButton}
               onClick={runIngestionFromUpload}
               disabled={!isAuthenticated || loading || !ingestionFile || transformDecision === "pending"}
             >
@@ -959,6 +1062,27 @@ export default function AdminPage() {
                 <h3>Embedding</h3>
                 <p>Dimension: {ingestionPreview.embeddings.dimension || "—"}</p>
               </div>
+            </div>
+          ) : null}
+
+          {ingestionLogs.length > 0 ? (
+            <div className={styles.leadsTable}>
+              <div className={styles.ingestionTableHeader}>
+                <span>Horodatage</span>
+                <span>Événement</span>
+                <span>Détails</span>
+                <span>Statut</span>
+                <span>—</span>
+              </div>
+              {ingestionLogs.map((log, index) => (
+                <div key={`${log.timestamp}-${index}`} className={styles.ingestionTableRow}>
+                  <span>{new Date(log.timestamp).toLocaleTimeString("fr-FR")}</span>
+                  <span>{log.event}</span>
+                  <span>{JSON.stringify(log.data)}</span>
+                  <span>{log.event === "error" || log.event === "client_error" ? "❌" : "✅"}</span>
+                  <span>{streamRunning && index === ingestionLogs.length - 1 ? "en cours..." : ""}</span>
+                </div>
+              ))}
             </div>
           ) : null}
 
