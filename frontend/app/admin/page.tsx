@@ -1,13 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import styles from "./page.module.css";
 
 const DEFAULT_BACKEND_PORT = "19081";
+const DEV_BACKEND_PORT = "8000";
 
 const formatHostname = (hostname: string) =>
   hostname.includes(":") ? `[${hostname}]` : hostname;
+
+const resolveBackendPort = (frontendPort: string) => {
+  if (process.env.NEXT_PUBLIC_BACKEND_PORT) {
+    return process.env.NEXT_PUBLIC_BACKEND_PORT;
+  }
+  if (frontendPort === "3000") {
+    return DEV_BACKEND_PORT;
+  }
+  if (frontendPort === "19080") {
+    return DEFAULT_BACKEND_PORT;
+  }
+  return DEFAULT_BACKEND_PORT;
+};
 
 const resolveApiBases = () => {
   const bases: string[] = [];
@@ -19,13 +33,11 @@ const resolveApiBases = () => {
   }
   if (typeof window !== "undefined") {
     const { origin, protocol, hostname, port } = window.location;
-    bases.push(origin);
-
-    const backendPort =
-      process.env.NEXT_PUBLIC_BACKEND_PORT ?? DEFAULT_BACKEND_PORT;
+    const backendPort = resolveBackendPort(port);
     if (backendPort && backendPort !== port) {
       bases.push(`${protocol}//${formatHostname(hostname)}:${backendPort}`);
     }
+    bases.push(origin);
   }
   return Array.from(new Set(bases));
 };
@@ -86,6 +98,57 @@ type KbChunk = {
   source_uri: string | null;
 };
 
+
+type IngestionPreview = {
+  document: {
+    title: string;
+    source_uri: string;
+    char_count: number;
+    token_estimate: number;
+  };
+  split: {
+    block_count: number;
+    blocks: string[];
+  };
+  chunks: Array<{
+    chunk_index: number;
+    content: string;
+    token_count: number;
+    char_count: number;
+    embedding_dimension?: number;
+    embedding_preview?: number[];
+  }>;
+  embeddings: {
+    generated: boolean;
+    count: number;
+    dimension: number;
+  };
+};
+
+type IngestionRun = {
+  run_id: string;
+  document_id: string;
+  title: string;
+  source_uri: string;
+  status: string;
+  rows: Array<{
+    chunk_id: string;
+    chunk_index: number;
+    token_count: number;
+    content_preview: string;
+    embedding_dimension: number;
+  }>;
+};
+
+type AdminTab = "conversations" | "leads" | "knowledge" | "ingestion";
+
+const ADMIN_TABS: Array<{ id: AdminTab; label: string }> = [
+  { id: "conversations", label: "Discussions" },
+  { id: "leads", label: "Contacts" },
+  { id: "knowledge", label: "Base de connaissances" },
+  { id: "ingestion", label: "Ingestion" },
+];
+
 export default function AdminPage() {
   const apiCandidates = useMemo(() => resolveApiBases(), []);
   const [apiBase, setApiBase] = useState<string | null>(null);
@@ -98,27 +161,52 @@ export default function AdminPage() {
   const [kbChunks, setKbChunks] = useState<KbChunk[]>([]);
   const [kbQuery, setKbQuery] = useState("");
   const [kbDocumentFilter, setKbDocumentFilter] = useState("all");
+  const [ingestionTitle, setIngestionTitle] = useState("");
+  const [ingestionSourceUri, setIngestionSourceUri] = useState("");
+  const [ingestionContent, setIngestionContent] = useState("");
+  const [ingestionChunkSize, setIngestionChunkSize] = useState("200");
+  const [ingestionOverlap, setIngestionOverlap] = useState("40");
+  const [ingestionPreview, setIngestionPreview] = useState<IngestionPreview | null>(null);
+  const [ingestionRun, setIngestionRun] = useState<IngestionRun | null>(null);
+  const [ingestionFile, setIngestionFile] = useState<File | null>(null);
+  const [activeTab, setActiveTab] = useState<AdminTab>("conversations");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const hasDiscoveredBackend = useRef(false);
 
   useEffect(() => {
+    if (hasDiscoveredBackend.current) {
+      return;
+    }
+    hasDiscoveredBackend.current = true;
+
     const discover = async () => {
+      const failedCandidates: string[] = [];
       for (const candidate of apiCandidates) {
         try {
           const response = await fetch(`${candidate}/health`);
           if (response.ok) {
             setApiBase(candidate);
+            setError(null);
             return;
           }
-        } catch (candidateError) {
-          console.warn(
-            `[TNChatbot] Admin health check failed for ${candidate}.`,
-            candidateError,
-          );
+          failedCandidates.push(`${candidate} (HTTP ${response.status})`);
+        } catch {
+          failedCandidates.push(`${candidate} (injoignable)`);
         }
       }
+
+      if (failedCandidates.length > 0) {
+        console.info(
+          `[TNChatbot] Admin backend discovery failed: ${failedCandidates.join(" | ")}`,
+        );
+      }
       setError(
-        "Impossible de détecter le backend. Vérifiez l'URL et la configuration.",
+        [
+          "Impossible de joindre le backend API (endpoints /api/admin).",
+          `URLs testées : ${failedCandidates.join(" · ") || "aucune"}.`,
+          "Astuce : en local, démarrez le backend sur :8000 ou définissez NEXT_PUBLIC_BACKEND_URL / NEXT_PUBLIC_BACKEND_PORT.",
+        ].join(" "),
       );
     };
 
@@ -230,6 +318,116 @@ export default function AdminPage() {
     }
   };
 
+  const runIngestionPreview = async () => {
+    if (!apiBase || !password) {
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/admin/kb/ingestion/preview`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Password": password,
+        },
+        body: JSON.stringify({
+          title: ingestionTitle,
+          source_uri: ingestionSourceUri,
+          content: ingestionContent,
+          chunk_size: Number(ingestionChunkSize),
+          overlap: Number(ingestionOverlap),
+          include_embeddings: true,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error("Prévisualisation ingestion impossible.");
+      }
+      const payload = (await response.json()) as IngestionPreview;
+      setIngestionPreview(payload);
+      setIngestionRun(null);
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Erreur inconnue pendant la prévisualisation.";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runIngestion = async () => {
+    if (!apiBase || !password) {
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/admin/kb/ingestion/run`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Password": password,
+        },
+        body: JSON.stringify({
+          title: ingestionTitle,
+          source_uri: ingestionSourceUri,
+          content: ingestionContent,
+          chunk_size: Number(ingestionChunkSize),
+          overlap: Number(ingestionOverlap),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error("Ingestion impossible.");
+      }
+      const payload = (await response.json()) as IngestionRun;
+      setIngestionRun(payload);
+      await fetchAdminData();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Erreur inconnue pendant l'ingestion.";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runIngestionFromUpload = async () => {
+    if (!apiBase || !password || !ingestionFile) {
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", ingestionFile);
+      formData.append("title", ingestionTitle || ingestionFile.name.replace(/\.[^.]+$/, ""));
+      formData.append("source_uri", ingestionSourceUri || `admin/upload/${ingestionFile.name}`);
+      formData.append("chunk_size", ingestionChunkSize);
+      formData.append("overlap", ingestionOverlap);
+
+      const response = await fetch(`${apiBase}/api/admin/kb/ingestion/upload`, {
+        method: "POST",
+        headers: { "X-Admin-Password": password },
+        body: formData,
+      });
+      if (!response.ok) {
+        throw new Error("Ingestion via upload impossible.");
+      }
+      const payload = (await response.json()) as IngestionRun;
+      setIngestionRun(payload);
+      setIngestionPreview(null);
+      await fetchAdminData();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Erreur inconnue pendant l'upload.";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const refreshData = async () => {
     if (!isAuthenticated) {
       return;
@@ -306,6 +504,20 @@ export default function AdminPage() {
         </article>
       </section>
 
+      <nav className={styles.tabs} aria-label="Sections administrateur">
+        {ADMIN_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className={`${styles.tabButton} ${activeTab === tab.id ? styles.tabButtonActive : ""}`}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </nav>
+
+      {activeTab === "conversations" ? (
       <section className={styles.section}>
         <div className={styles.sectionHeader}>
           <h2>Discussions enregistrées</h2>
@@ -353,7 +565,9 @@ export default function AdminPage() {
           ))}
         </div>
       </section>
+      ) : null}
 
+      {activeTab === "leads" ? (
       <section className={styles.section}>
         <div className={styles.sectionHeader}>
           <h2>Fiches de contact</h2>
@@ -390,7 +604,9 @@ export default function AdminPage() {
           )}
         </div>
       </section>
+      ) : null}
 
+      {activeTab === "knowledge" ? (
       <section className={styles.section}>
         <div className={styles.sectionHeader}>
           <h2>Base de connaissances</h2>
@@ -508,6 +724,143 @@ export default function AdminPage() {
           </article>
         </div>
       </section>
+      ) : null}
+
+      {activeTab === "ingestion" ? (
+      <section className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <h2>Ingestion manuelle (Admin)</h2>
+          <span>Split → Chunking → Embedding → Indexing</span>
+        </div>
+        <article className={styles.card}>
+          <div className={styles.chunkFilters}>
+            <label>
+              <span>Titre</span>
+              <input
+                type="text"
+                value={ingestionTitle}
+                onChange={(event) => setIngestionTitle(event.target.value)}
+                placeholder="Titre du document"
+              />
+            </label>
+            <label>
+              <span>Source URI</span>
+              <input
+                type="text"
+                value={ingestionSourceUri}
+                onChange={(event) => setIngestionSourceUri(event.target.value)}
+                placeholder="admin/manual/document"
+              />
+            </label>
+            <label>
+              <span>Chunk size</span>
+              <input
+                type="number"
+                value={ingestionChunkSize}
+                onChange={(event) => setIngestionChunkSize(event.target.value)}
+              />
+            </label>
+            <label>
+              <span>Overlap</span>
+              <input
+                type="number"
+                value={ingestionOverlap}
+                onChange={(event) => setIngestionOverlap(event.target.value)}
+              />
+            </label>
+          </div>
+          <label className={styles.tokenField}>
+            <span>Uploader un fichier (.txt, .md)</span>
+            <input
+              type="file"
+              accept=".txt,.md,text/plain,text/markdown"
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                setIngestionFile(file);
+                if (file) {
+                  setIngestionTitle((current) => current || file.name.replace(/\.[^.]+$/, ""));
+                  setIngestionSourceUri((current) => current || `admin/upload/${file.name}`);
+                }
+              }}
+            />
+          </label>
+          <label className={styles.tokenField}>
+            <span>Contenu document (optionnel si upload)</span>
+            <textarea
+              className={styles.textarea}
+              value={ingestionContent}
+              onChange={(event) => setIngestionContent(event.target.value)}
+              placeholder="Collez votre document ici..."
+            />
+          </label>
+          <div className={styles.actions}>
+            <button
+              type="button"
+              className={styles.primaryButton}
+              onClick={runIngestionPreview}
+              disabled={!isAuthenticated || loading || !ingestionContent.trim()}
+            >
+              Prévisualiser pipeline
+            </button>
+            <button
+              type="button"
+              className={styles.primaryButton}
+              onClick={runIngestion}
+              disabled={!isAuthenticated || loading || (!ingestionContent.trim() && !ingestionFile)}
+            >
+              Lancer ingestion
+            </button>
+            <button
+              type="button"
+              className={styles.primaryButton}
+              onClick={runIngestionFromUpload}
+              disabled={!isAuthenticated || loading || !ingestionFile}
+            >
+              Uploader et ingérer
+            </button>
+          </div>
+
+          {ingestionPreview ? (
+            <div className={styles.ingestionGrid}>
+              <div>
+                <h3>Split</h3>
+                <p>{ingestionPreview.split.block_count} blocs détectés</p>
+              </div>
+              <div>
+                <h3>Chunking</h3>
+                <p>{ingestionPreview.chunks.length} chunks générés</p>
+              </div>
+              <div>
+                <h3>Embedding</h3>
+                <p>Dimension: {ingestionPreview.embeddings.dimension || "—"}</p>
+              </div>
+            </div>
+          ) : null}
+
+          {ingestionRun ? (
+            <div className={styles.leadsTable}>
+              <div className={styles.ingestionTableHeader}>
+                <span>Chunk</span>
+                <span>Tokens</span>
+                <span>Dimension</span>
+                <span>Aperçu contenu</span>
+                <span>Chunk ID</span>
+              </div>
+              {ingestionRun.rows.map((row) => (
+                <div key={row.chunk_id} className={styles.ingestionTableRow}>
+                  <span>{row.chunk_index + 1}</span>
+                  <span>{row.token_count}</span>
+                  <span>{row.embedding_dimension}</span>
+                  <span>{row.content_preview}</span>
+                  <span>{row.chunk_id.slice(0, 12)}...</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </article>
+      </section>
+      ) : null}
+
     </main>
   );
 }
