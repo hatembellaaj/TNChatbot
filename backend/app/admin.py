@@ -59,8 +59,6 @@ def load_admin_config(keys: Iterable[str] = ADMIN_CONFIG_KEYS) -> Dict[str, Any]
     keys_list = list(keys)
     if not keys_list:
         return config
-    if report:
-        report("database_write_started", {})
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -73,8 +71,6 @@ def load_admin_config(keys: Iterable[str] = ADMIN_CONFIG_KEYS) -> Dict[str, Any]
 
 
 def _upsert_config(key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    if report:
-        report("database_write_started", {})
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -90,8 +86,6 @@ def _upsert_config(key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _get_config(key: str) -> Dict[str, Any]:
-    if report:
-        report("database_write_started", {})
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT value FROM admin_config WHERE key = %s", (key,))
@@ -143,8 +137,6 @@ def put_sectors(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
 
 @router.get("/api/admin/leads")
 def get_leads(format: str | None = Query(default=None)) -> Any:
-    if report:
-        report("database_write_started", {})
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -212,8 +204,6 @@ def get_leads(format: str | None = Query(default=None)) -> Any:
 
 @router.get("/api/admin/overview")
 def get_overview() -> Dict[str, Any]:
-    if report:
-        report("database_write_started", {})
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM chat_sessions")
@@ -241,8 +231,6 @@ def get_conversations(
     limit: int = Query(default=20, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> Dict[str, Any]:
-    if report:
-        report("database_write_started", {})
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM chat_sessions")
@@ -301,8 +289,6 @@ def get_kb_documents(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> Dict[str, Any]:
-    if report:
-        report("database_write_started", {})
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM kb_documents")
@@ -365,8 +351,6 @@ def get_kb_chunks(
         params.append(f"%{query}%")
 
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-    if report:
-        report("database_write_started", {})
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
