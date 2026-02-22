@@ -180,3 +180,27 @@ def test_specific_form_flows_prompt_extra_fields():
         {},
     )
     assert response["suggested_next_step"] == sm.ConversationStep.FORM_STANDARD_FIRST_NAME.value
+
+
+def test_launch_year_question_uses_rag_since_without_llm(monkeypatch):
+    rag_context = "\n".join([
+        '[1] (source: tn_kit_media_2025) {"knowledge_base":{"brand_overview":{"since":"2010-12"}}}',
+        '[2] Tunisie Numérique a été lancé en décembre 2010.',
+    ])
+
+    monkeypatch.setattr(sm, "retrieve_rag_context", lambda *_args, **_kwargs: rag_context)
+
+    def _fail_call_llm(_messages):
+        raise AssertionError("LLM should not be called when factual answer is extracted from RAG")
+
+    monkeypatch.setattr(sm, "call_llm", _fail_call_llm)
+
+    response = sm.handle_step(
+        sm.ConversationStep.BUDGET_OBJECTIVE,
+        "En quelle année Tunisie Numérique a-t-il été lancé ?",
+        None,
+        {},
+    )
+
+    assert "2010" in response["assistant_message"]
+    assert response["safety"]["rag_used"] is True
