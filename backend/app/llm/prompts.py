@@ -4,7 +4,8 @@ import re
 import json
 from typing import Any, Dict, List
 
-SYSTEM_PROMPT = """
+SYSTEM_PROMPT = (
+    """
 Tu réponds au nom de Tunisie Numérique (annonceurs).
 
 Règles obligatoires :
@@ -18,8 +19,8 @@ Règles obligatoires :
 - Ne réponds jamais de manière générique si le contexte contient l'information.
 - Réponds en texte simple (pas de JSON, pas de balises).
 - Tu ne produis jamais de structure JSON.
-"""
-.strip()
+""".strip()
+)
 
 LOGGER = logging.getLogger(__name__)
 
