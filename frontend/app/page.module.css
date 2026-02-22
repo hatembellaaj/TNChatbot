@@ -223,3 +223,53 @@
     max-width: 100%;
   }
 }
+
+.ragInspector {
+  margin-top: 0.5rem;
+}
+
+.ragToggleButton {
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  background: rgba(30, 64, 175, 0.15);
+  color: #bfdbfe;
+  border-radius: 10px;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.ragPanel {
+  margin-top: 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.55);
+  padding: 0.65rem;
+}
+
+.ragTitle {
+  margin: 0.25rem 0;
+  font-size: 0.75rem;
+  color: #cbd5e1;
+}
+
+.ragContext {
+  white-space: pre-wrap;
+  margin: 0.25rem 0 0.5rem;
+  font-size: 0.75rem;
+  color: #e2e8f0;
+}
+
+.ragChunkList {
+  margin: 0.25rem 0 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: #dbeafe;
+}
+
+.ragEmpty {
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}

@@ -129,6 +129,12 @@ class RetrievedChunk:
     point_id: str | int | None = None
 
 
+@dataclass(frozen=True)
+class RagSelection:
+    context: str
+    selected_chunks: List[dict]
+
+
 def chunk_text(text: str, max_tokens: int, overlap: int) -> List[str]:
     words = [word for word in text.split() if word.strip()]
     if not words:
@@ -434,3 +440,16 @@ def retrieve_rag_context(
     else:
         LOGGER.warning("rag_no_chunk_selected")
     return build_rag_context(best_chunks)
+
+
+def retrieve_rag_selection(
+    query: str,
+    top_k: int | None = None,
+    intent: str | None = None,
+) -> RagSelection:
+    context = retrieve_rag_context(query, top_k=top_k, intent=intent)
+    selected_chunks: List[dict] = []
+    if context:
+        for chunk in context.split("\n\n"):
+            selected_chunks.append({"content": chunk})
+    return RagSelection(context=context, selected_chunks=selected_chunks)

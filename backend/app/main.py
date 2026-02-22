@@ -42,7 +42,7 @@ from app.rag.retrieve import (
     build_config,
     classify_intent,
     is_factual_question,
-    retrieve_rag_context,
+    retrieve_rag_selection,
     should_trigger_rag,
 )
 
@@ -335,6 +335,7 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
     context_config = payload.context.get("config") or {}
     config = build_config({**admin_config, **context_config})
     rag_context = payload.context.get("rag_context", "")
+    rag_selected_chunks = payload.context.get("rag_selected_chunks") or []
     raw_step = payload.state.get("step", "UNKNOWN")
     resolved_step = normalize_step(raw_step) or ConversationStep.MAIN_MENU
     step = resolved_step.value
@@ -465,13 +466,15 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
     )
     if rag_triggered:
         try:
-            retrieved_context = retrieve_rag_context(
+            selection = retrieve_rag_selection(
                 payload.user_message,
                 intent=intent,
             )
+            retrieved_context = selection.context
             rag_context = "\n\n".join(
                 [context for context in (rag_context, retrieved_context) if context]
             )
+            rag_selected_chunks = selection.selected_chunks
         except Exception as exc:  # noqa: BLE001 - log and continue with empty context
             LOGGER.warning("RAG retrieval failed", exc_info=exc)
         LOGGER.info("rag_used=true intent=%s", intent or "unknown")
@@ -552,7 +555,11 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
         suggested_next_step=next_step,
         slot_updates=slot_updates,
         handoff={"requested": False},
-        safety={"rag_used": bool(rag_context)},
+        safety={
+            "rag_used": bool(rag_context),
+            "rag_selected_chunks": rag_selected_chunks,
+            "rag_context": rag_context,
+        },
     )
 
 
@@ -573,6 +580,7 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
     context_config = payload.context.get("config") or {}
     config = build_config({**admin_config, **context_config})
     rag_context = payload.context.get("rag_context", "")
+    rag_selected_chunks = payload.context.get("rag_selected_chunks") or []
     raw_step = payload.state.get("step", "UNKNOWN")
     resolved_step = normalize_step(raw_step) or ConversationStep.MAIN_MENU
     step = resolved_step.value
@@ -751,13 +759,15 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
     )
     if rag_triggered:
         try:
-            retrieved_context = retrieve_rag_context(
+            selection = retrieve_rag_selection(
                 payload.user_message,
                 intent=intent,
             )
+            retrieved_context = selection.context
             rag_context = "\n\n".join(
                 [context for context in (rag_context, retrieved_context) if context]
             )
+            rag_selected_chunks = selection.selected_chunks
         except Exception as exc:  # noqa: BLE001 - log and continue with empty context
             LOGGER.warning("RAG retrieval failed", exc_info=exc)
         LOGGER.info("rag_used=true intent=%s", intent or "unknown")
@@ -865,7 +875,11 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
             "step": next_step,
             "slot_updates": slot_updates,
             "handoff": {"requested": False},
-            "safety": {"rag_used": bool(rag_context)},
+            "safety": {
+                "rag_used": bool(rag_context),
+                "rag_selected_chunks": rag_selected_chunks,
+                "rag_context": rag_context,
+            },
             "suggested_next_step": next_step,
             "latency_ms": int((time.monotonic() - llm_start) * 1000),
         }

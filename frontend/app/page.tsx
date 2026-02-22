@@ -35,6 +35,10 @@ type ChatButton = {
   label: string;
 };
 
+type RagChunk = {
+  content: string;
+};
+
 type ChatMessage = {
   id: string;
   role: "assistant" | "user";
@@ -42,6 +46,8 @@ type ChatMessage = {
   createdAt: string;
   buttons?: ChatButton[];
   streaming?: boolean;
+  ragSelectedChunks?: RagChunk[];
+  ragContext?: string;
 };
 
 type ChatState = {
@@ -55,6 +61,10 @@ type ChatPayload = {
   buttons: ChatButton[];
   suggested_next_step: string;
   slot_updates: Record<string, string>;
+  safety?: {
+    rag_selected_chunks?: RagChunk[];
+    rag_context?: string;
+  };
 };
 
 const buildTextPayload = (
@@ -104,6 +114,7 @@ export default function Home() {
   const [formState, setFormState] = useState(initialForm);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [expandedRagMessageId, setExpandedRagMessageId] = useState<string | null>(null);
   const initRef = useRef(false);
 
   const shouldShowForm = useMemo(() => {
@@ -213,6 +224,8 @@ export default function Home() {
         content: payload.assistant_message,
         streaming: false,
         buttons: payload.buttons,
+        ragSelectedChunks: payload.safety?.rag_selected_chunks ?? [],
+        ragContext: payload.safety?.rag_context ?? "",
       }));
       onDone();
       return;
@@ -233,6 +246,8 @@ export default function Home() {
           ...message,
           streaming: false,
           buttons: payload.buttons,
+          ragSelectedChunks: payload.safety?.rag_selected_chunks ?? [],
+          ragContext: payload.safety?.rag_context ?? "",
         }));
         onDone();
       }
@@ -323,6 +338,10 @@ export default function Home() {
               parsed.slot_updates && typeof parsed.slot_updates === "object"
                 ? parsed.slot_updates
                 : {},
+            safety:
+              parsed.safety && typeof parsed.safety === "object"
+                ? parsed.safety
+                : undefined,
           };
         } else {
           payload = buildTextPayload(rawBody.trim(), fallbackStep);
@@ -420,6 +439,41 @@ export default function Home() {
                       minute: "2-digit",
                     })}
                   </div>
+                  {message.role === "assistant" ? (
+                    <div className={styles.ragInspector}>
+                      <button
+                        type="button"
+                        className={styles.ragToggleButton}
+                        onClick={() =>
+                          setExpandedRagMessageId((current) =>
+                            current === message.id ? null : message.id,
+                          )
+                        }
+                      >
+                        {expandedRagMessageId === message.id
+                          ? "Masquer les chunks élus"
+                          : "Voir les chunks élus"}
+                      </button>
+                      {expandedRagMessageId === message.id ? (
+                        <div className={styles.ragPanel} data-testid="rag-panel">
+                          <p className={styles.ragTitle}>Contexte envoyé au LLM</p>
+                          <pre className={styles.ragContext}>
+                            {message.ragContext || "Aucun contexte RAG envoyé au LLM pour cette réponse."}
+                          </pre>
+                          <p className={styles.ragTitle}>Chunks élus</p>
+                          {(message.ragSelectedChunks?.length ?? 0) > 0 ? (
+                            <ol className={styles.ragChunkList}>
+                              {message.ragSelectedChunks?.map((chunk, index) => (
+                                <li key={`${message.id}-chunk-${index}`}>{chunk.content}</li>
+                              ))}
+                            </ol>
+                          ) : (
+                            <p className={styles.ragEmpty}>Aucun chunk élu pour cette réponse.</p>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {message.buttons && message.buttons.length > 0 ? (
                     <div className={styles.buttonRow}>
                       {message.buttons.map((button) => (
