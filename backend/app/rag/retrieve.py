@@ -342,6 +342,7 @@ def retrieve_rag_context(
         score_threshold,
     )
     chunks = search_qdrant(vector, resolved_top_k, score_threshold, normalized_intent)
+    semantic_chunks = list(chunks)
     LOGGER.warning(
         "rag_search_results count=%s doc_ids=%s",
         len(chunks),
@@ -388,7 +389,14 @@ def retrieve_rag_context(
             len(filtered_chunks),
             normalized_intent,
         )
-        if not filtered_chunks:
+        if not filtered_chunks and semantic_chunks:
+            LOGGER.warning(
+                "rag_intent_filter_empty_keep_semantic count=%s intent=%s",
+                len(semantic_chunks),
+                normalized_intent,
+            )
+            chunks = semantic_chunks
+        elif not filtered_chunks:
             LOGGER.warning("rag_intent_empty_fallback intent=%s", normalized_intent)
             LOGGER.warning("rag_intent_source_fallback intent=%s", normalized_intent)
             chunks = search_qdrant(vector, resolved_top_k, score_threshold)
@@ -426,7 +434,8 @@ def retrieve_rag_context(
                     len(filtered_chunks),
                     normalized_intent,
                 )
-        chunks = filtered_chunks
+        if filtered_chunks:
+            chunks = filtered_chunks
     best_chunks = chunks[:2]
     if best_chunks:
         for index, chunk in enumerate(best_chunks, start=1):
