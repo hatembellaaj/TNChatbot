@@ -116,10 +116,51 @@ def _extract_launch_year_from_context(user_message: str, rag_context: str) -> st
     return None
 
 
+def _format_int_fr(value: int) -> str:
+    return f"{value:,}".replace(",", " ")
+
+
+def _extract_visits_total_2024_from_context(user_message: str, rag_context: str) -> int | None:
+    normalized_question = user_message.lower()
+    visits_keywords = ("visites", "trafic")
+    year_keywords = ("2024",)
+    total_keywords = ("total", "totales", "totaux")
+    if not any(keyword in normalized_question for keyword in visits_keywords):
+        return None
+    if not any(keyword in normalized_question for keyword in year_keywords):
+        return None
+    if not any(keyword in normalized_question for keyword in total_keywords):
+        return None
+
+    json_match = re.search(r'"visits_total"\s*:\s*(\d{5,})', rag_context)
+    if json_match:
+        return int(json_match.group(1))
+
+    sentence_match = re.search(
+        r"en\s*2024[^.\n]{0,180}visites",
+        rag_context,
+        flags=re.IGNORECASE,
+    )
+    if sentence_match:
+        candidates = re.findall(r"\d[\d \u00A0]{4,}", sentence_match.group(0))
+        values = [int(re.sub(r"\D", "", candidate)) for candidate in candidates]
+        if values:
+            return max(values)
+
+    return None
+
+
 def _build_direct_factual_answer(user_message: str, rag_context: str) -> str | None:
     launch_year = _extract_launch_year_from_context(user_message, rag_context)
     if launch_year:
         return f"Tunisie Numérique a été lancé en {launch_year}."
+
+    visits_total_2024 = _extract_visits_total_2024_from_context(user_message, rag_context)
+    if visits_total_2024 is not None:
+        return (
+            "En 2024, Tunisie Numérique a enregistré "
+            f"{_format_int_fr(visits_total_2024)} visites au total."
+        )
     return None
 def initialize_db() -> None:
     global CHAT_MESSAGES_FK_TARGET, CHAT_SESSIONS_HAS_ID, CHAT_SESSIONS_HAS_SESSION_ID
