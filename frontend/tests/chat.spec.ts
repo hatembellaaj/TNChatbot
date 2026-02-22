@@ -10,6 +10,10 @@ type ChatPayload = {
   buttons: ChatButton[];
   suggested_next_step: string;
   slot_updates: Record<string, string>;
+  safety?: {
+    rag_selected_chunks?: Array<{ content: string }>;
+    rag_context?: string;
+  };
 };
 
 const buildPayload = (
@@ -17,11 +21,13 @@ const buildPayload = (
   step: string,
   buttons: ChatButton[] = [],
   slot_updates?: Record<string, string>,
+  safety?: ChatPayload["safety"],
 ): ChatPayload => ({
   assistant_message,
   buttons,
   suggested_next_step: step,
   slot_updates: slot_updates ?? {},
+  safety,
 });
 
 test.beforeEach(async ({ page }) => {
@@ -71,6 +77,18 @@ test.beforeEach(async ({ page }) => {
           "Flux en cours avant final.",
           "STREAMING_TEST",
           [{ id: "CTA", label: "CTA" }],
+        );
+        break;
+      case "Question RAG":
+        payload = buildPayload(
+          "Réponse basée sur chunks.",
+          "RAG",
+          [],
+          {},
+          {
+            rag_context: "[1] Chunk A\n\n[2] Chunk B",
+            rag_selected_chunks: [{ content: "[1] Chunk A" }, { content: "[2] Chunk B" }],
+          },
         );
         break;
       default:
@@ -161,4 +179,21 @@ test("typing effect after full response", async ({ page }) => {
   }).toBeLessThan(finalText.length);
 
   await expect(assistantMessage).toHaveText(finalText);
+});
+
+
+test("inspection des chunks élus", async ({ page }) => {
+  await page.goto("/");
+  await page
+    .getByPlaceholder("Posez votre question ou choisissez un menu...")
+    .fill("Question RAG");
+  await page.getByRole("button", { name: "Envoyer" }).click();
+
+  await expect(page.getByRole("button", { name: "Voir les chunks élus" }).last()).toBeVisible();
+  await page.getByRole("button", { name: "Voir les chunks élus" }).last().click();
+
+  const panel = page.getByTestId("rag-panel").last();
+  await expect(panel).toContainText("Contexte envoyé au LLM");
+  await expect(panel).toContainText("[1] Chunk A");
+  await expect(panel).toContainText("[2] Chunk B");
 });

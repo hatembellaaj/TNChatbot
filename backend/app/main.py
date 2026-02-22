@@ -555,7 +555,11 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
         suggested_next_step=next_step,
         slot_updates=slot_updates,
         handoff={"requested": False},
-        safety={"rag_used": bool(rag_context), "rag_selected_chunks": rag_selected_chunks},
+        safety={
+            "rag_used": bool(rag_context),
+            "rag_selected_chunks": rag_selected_chunks,
+            "rag_context": rag_context,
+        },
     )
 
 
@@ -871,7 +875,11 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
             "step": next_step,
             "slot_updates": slot_updates,
             "handoff": {"requested": False},
-            "safety": {"rag_used": bool(rag_context), "rag_selected_chunks": rag_selected_chunks},
+            "safety": {
+                "rag_used": bool(rag_context),
+                "rag_selected_chunks": rag_selected_chunks,
+                "rag_context": rag_context,
+            },
             "suggested_next_step": next_step,
             "latency_ms": int((time.monotonic() - llm_start) * 1000),
         }
