@@ -42,6 +42,7 @@ from app.rag.retrieve import (
     build_config,
     classify_intent,
     is_factual_question,
+    response_indicates_not_found,
     retrieve_rag_selection,
     should_trigger_rag,
 )
@@ -508,12 +509,38 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
 
     try:
         llm_response = call_llm(messages)
-    
+
         LOGGER.warning(
             "llm_raw_response session_id=%s response=%s",
             payload.session_id,
             llm_response,
         )
+
+        if rag_triggered and response_indicates_not_found(llm_response):
+            LOGGER.warning("rag_not_found_detected retrying_with_higher_k")
+            retry_selection = retrieve_rag_selection(
+                payload.user_message,
+                top_k=15,
+                intent=intent,
+            )
+            if retry_selection.context:
+                rag_context = retry_selection.context
+                rag_selected_chunks = retry_selection.selected_chunks
+                retry_messages = build_messages(
+                    step=step,
+                    allowed_buttons=allowed_buttons,
+                    form_schema=form_schema,
+                    config=config,
+                    rag_context=rag_context,
+                    rag_empty_factual=False,
+                    user_message=payload.user_message,
+                )
+                llm_response = call_llm(retry_messages)
+                LOGGER.warning(
+                    "llm_raw_response_retry session_id=%s response=%s",
+                    payload.session_id,
+                    llm_response,
+                )
 
         validated = validate_or_fallback(
             llm_response,

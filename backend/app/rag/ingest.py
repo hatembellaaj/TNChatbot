@@ -14,7 +14,7 @@ import psycopg
 
 DEFAULT_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/postgres"
 DEFAULT_QDRANT_URL = "http://localhost:6333"
-DEFAULT_QDRANT_COLLECTION = "tnchatbot_kb"
+DEFAULT_QDRANT_COLLECTION = "index_source"
 DEFAULT_EMBEDDING_URL = "http://localhost:8001/v1/embeddings"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_EMBEDDING_TIMEOUT_SECONDS = 30
@@ -266,6 +266,21 @@ def derive_intent_from_path(path: Path) -> str:
     return stem
 
 
+def derive_metadata(path: Path) -> dict:
+    stem = derive_intent_from_path(path)
+    section = "general"
+    entity = stem
+    if "communiqu" in stem or "press" in stem:
+        section = "press"
+        entity = "communique_presse"
+    intent = "pricing" if "budget" in stem or "price" in stem or "tarif" in stem else stem
+    return {
+        "section": section,
+        "intent": intent,
+        "entity": entity,
+    }
+
+
 def upsert_qdrant_points(points: List[dict]) -> None:
     if not points:
         return
@@ -292,6 +307,11 @@ def ingest_sources(source_dir: Path | str | None = None) -> dict:
         }
 
         for path in iter_source_files(source_root):
+            lower_name = path.name.lower()
+            if any(token in lower_name for token in {"training", "synthetic", "generated", "prompt"}):
+                LOGGER.info("Skipping non-source file: %s", path.name)
+                stats["skipped"] += 1
+                continue
             text = path.read_text(encoding="utf-8")
             if not text.strip():
                 stats["skipped"] += 1
@@ -318,7 +338,7 @@ def ingest_sources(source_dir: Path | str | None = None) -> dict:
             embeddings = embed_texts(chunks)
             ensure_qdrant_collection(len(embeddings[0]))
             points: List[dict] = []
-            intent = derive_intent_from_path(path)
+            metadata = derive_metadata(path)
 
             for index, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
                 chunk_id = uuid.uuid4()
@@ -345,7 +365,9 @@ def ingest_sources(source_dir: Path | str | None = None) -> dict:
                             "document_id": str(doc_id),
                             "chunk_index": index,
                             "content": chunk,
-                            "intent": intent,
+                            "intent": metadata["intent"],
+                            "section": metadata["section"],
+                            "entity": metadata["entity"],
                             "source_uri": str(path.relative_to(source_root)),
                             "title": path.stem,
                         },
