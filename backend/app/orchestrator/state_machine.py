@@ -731,12 +731,42 @@ def build_wizard_prompt(step: ConversationStep) -> str:
     return FORM_MESSAGES.get(step, "Merci pour ces précisions.")
 
 
+def _extract_launch_year_from_rag(rag_context: str, user_message: str) -> Optional[str]:
+    normalized = normalize_text(user_message)
+    launch_keywords = ("annee", "lancement", "lance", "creation", "cree", "depuis")
+    if not any(keyword in normalized for keyword in launch_keywords):
+        return None
+
+    since_match = re.search(r'"since"\s*:\s*"(\d{4})(?:-\d{2})?"', rag_context)
+    if since_match:
+        return since_match.group(1)
+
+    sentence_match = re.search(
+        r"tunisie numerique[^.\n]{0,120}(?:lanc[eé]e?|cr[ée]e?|depuis)[^.\n]{0,80}(\d{4})",
+        normalize_text(rag_context),
+    )
+    if sentence_match:
+        return sentence_match.group(1)
+    return None
+
+
+def _build_factual_rag_answer(rag_context: str, user_message: str) -> Optional[str]:
+    launch_year = _extract_launch_year_from_rag(rag_context, user_message)
+    if launch_year:
+        return f"Tunisie Numérique a été lancé en {launch_year}."
+    return None
+
+
 def _answer_rag_question(user_message: str) -> str:
     try:
         rag_context = retrieve_rag_context(user_message, top_k=6)
     except Exception as exc:  # noqa: BLE001
         LOGGER.warning("wizard_rag_retrieval_failed", exc_info=exc)
         rag_context = ""
+
+    factual_answer = _build_factual_rag_answer(rag_context, user_message)
+    if factual_answer:
+        return factual_answer
 
     messages = build_messages(
         step="RAG_WIZARD",
