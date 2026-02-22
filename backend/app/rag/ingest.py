@@ -290,6 +290,15 @@ def upsert_qdrant_points(points: List[dict]) -> None:
     request_json("PUT", url, {"points": points})
 
 
+def delete_qdrant_points(point_ids: Sequence[str]) -> None:
+    if not point_ids:
+        return
+    qdrant_url = os.getenv("QDRANT_URL", DEFAULT_QDRANT_URL).rstrip("/")
+    collection = os.getenv("QDRANT_COLLECTION", DEFAULT_QDRANT_COLLECTION)
+    url = f"{qdrant_url}/collections/{collection}/points/delete?wait=true"
+    request_json("POST", url, {"points": list(point_ids)})
+
+
 def ingest_sources(source_dir: Path | str | None = None) -> dict:
     chunk_size = int(os.getenv("RAG_CHUNK_SIZE", "200"))
     overlap = int(os.getenv("RAG_CHUNK_OVERLAP", "40"))

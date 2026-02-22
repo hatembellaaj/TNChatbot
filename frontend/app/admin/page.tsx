@@ -159,12 +159,13 @@ type IngestionLogEntry = {
   data: Record<string, unknown>;
 };
 
-type AdminTab = "conversations" | "leads" | "knowledge" | "ingestion";
+type AdminTab = "conversations" | "leads" | "knowledge" | "manage_bc" | "ingestion";
 
 const ADMIN_TABS: Array<{ id: AdminTab; label: string }> = [
   { id: "conversations", label: "Discussions" },
   { id: "leads", label: "Contacts" },
   { id: "knowledge", label: "Base de connaissances" },
+  { id: "manage_bc", label: "Manage BC" },
   { id: "ingestion", label: "Ingestion" },
 ];
 
@@ -199,6 +200,7 @@ export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<AdminTab>("conversations");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
   const hasDiscoveredBackend = useRef(false);
 
   const selectedConversation = useMemo(
@@ -682,6 +684,37 @@ export default function AdminPage() {
     }
   };
 
+  const deleteKbDocument = async (documentId: string) => {
+    if (!apiBase || !password) {
+      return;
+    }
+    setDeletingDocumentId(documentId);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/admin/kb/documents/${documentId}`, {
+        method: "DELETE",
+        headers: { "X-Admin-Password": password },
+      });
+      if (!response.ok) {
+        const message = await extractApiError(response, "Suppression du document impossible.");
+        throw new Error(message);
+      }
+      await fetchAdminData();
+      await fetchKbChunks();
+      if (selectedDocumentId === documentId) {
+        setSelectedDocumentId(null);
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Erreur inconnue pendant la suppression du document.";
+      setError(message);
+    } finally {
+      setDeletingDocumentId(null);
+    }
+  };
+
   const refreshData = async () => {
     if (!isAuthenticated) {
       return;
@@ -1031,6 +1064,53 @@ export default function AdminPage() {
             ) : null}
           </article>
         </div>
+      </section>
+      ) : null}
+
+      {activeTab === "manage_bc" ? (
+      <section className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <h2>Manage BC</h2>
+          <span>Ajouter/supprimer des documents et leurs chunks associés</span>
+        </div>
+        <article className={styles.card}>
+          <div className={styles.sectionHeader}>
+            <h3>Suppression de documents</h3>
+            <span>{kbDocuments.length} documents</span>
+          </div>
+          <div className={styles.kbTable}>
+            <div className={styles.kbTableHeader}>
+              <span>Titre</span>
+              <span>Source</span>
+              <span>Chunks</span>
+              <span>Statut</span>
+              <span>Action</span>
+            </div>
+            {kbDocuments.length === 0 ? (
+              <div className={styles.emptyState}>
+                Aucun document à gérer.
+              </div>
+            ) : (
+              kbDocuments.map((doc) => (
+                <div key={`manage-${doc.id}`} className={styles.kbTableRow}>
+                  <span>{doc.title ?? "Sans titre"}</span>
+                  <span>{doc.source_uri ?? "Source inconnue"}</span>
+                  <span>{doc.chunk_count}</span>
+                  <span>{doc.status}</span>
+                  <button
+                    type="button"
+                    className={styles.inlineButton}
+                    onClick={() => void deleteKbDocument(doc.id)}
+                    disabled={!isAuthenticated || deletingDocumentId === doc.id || loading}
+                  >
+                    {deletingDocumentId === doc.id ? "Suppression..." : "Supprimer (document + chunks)"}
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+          <p>Pour ajouter un document, utilisez l'onglet <strong>Ingestion</strong>.</p>
+        </article>
       </section>
       ) : null}
 

@@ -19,6 +19,7 @@ from app.rag.ingest import (
     ensure_qdrant_collection,
     estimate_tokens,
     upsert_qdrant_points,
+    delete_qdrant_points,
     chunk_text,
 )
 
@@ -333,6 +334,39 @@ def get_kb_documents(
 
     return {"total": total, "count": len(items), "items": items}
 
+
+
+
+@router.delete("/api/admin/kb/documents/{document_id}")
+def delete_kb_document(document_id: str) -> Dict[str, Any]:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, title FROM kb_documents WHERE id = %s", (document_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Document introuvable")
+            doc_id, title = row
+
+            cur.execute("SELECT id FROM kb_chunks WHERE document_id = %s", (doc_id,))
+            chunk_ids = [str(chunk_id) for (chunk_id,) in cur.fetchall()]
+
+            cur.execute("DELETE FROM kb_documents WHERE id = %s", (doc_id,))
+
+    if chunk_ids:
+        try:
+            delete_qdrant_points(chunk_ids)
+        except Exception as exc:  # pragma: no cover
+            raise HTTPException(
+                status_code=502,
+                detail=f"Document supprimé en base, mais suppression Qdrant échouée: {exc}",
+            ) from exc
+
+    return {
+        "ok": True,
+        "document_id": str(doc_id),
+        "title": title,
+        "deleted_chunks": len(chunk_ids),
+    }
 
 @router.get("/api/admin/kb/chunks")
 def get_kb_chunks(
