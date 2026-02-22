@@ -17,6 +17,8 @@ DEFAULT_RAG_SCORE_THRESHOLD = 0.2
 DEFAULT_KB_SOURCES_DIR = "kb_sources"
 DEFAULT_RAG_CHUNK_SIZE = 400
 DEFAULT_RAG_CHUNK_OVERLAP = 80
+DEFAULT_RAG_LEXICAL_RERANK_CANDIDATES = 12
+DEFAULT_RAG_LEXICAL_WEIGHT = 0.35
 
 LOGGER = logging.getLogger(__name__)
 
@@ -79,6 +81,11 @@ FACTUAL_TOKENS = {
     "prix",
     "tarif",
     "formats",
+}
+
+LEXICAL_STOPWORDS = {
+    "le", "la", "les", "de", "du", "des", "un", "une", "et", "ou", "en", "sur", "dans",
+    "pour", "avec", "au", "aux", "est", "sont", "que", "qui", "quoi", "quel", "quelle", "quels", "quelles",
 }
 
 DEFAULT_ADMIN_CONFIG = {
@@ -219,6 +226,38 @@ def should_trigger_rag(intent: Optional[str], user_message: str) -> bool:
     return True
 
 
+def _tokenize_lexical(text: str) -> List[str]:
+    normalized = re.sub(r"[^\w\s]", " ", text.lower(), flags=re.UNICODE)
+    tokens = [token for token in normalized.split() if token and token not in LEXICAL_STOPWORDS]
+    return tokens
+
+
+def _lexical_overlap_score(query: str, content: str) -> float:
+    query_tokens = _tokenize_lexical(query)
+    if not query_tokens:
+        return 0.0
+    content_tokens = set(_tokenize_lexical(content))
+    if not content_tokens:
+        return 0.0
+    overlap_count = sum(1 for token in query_tokens if token in content_tokens)
+    return overlap_count / max(1, len(query_tokens))
+
+
+def rerank_chunks_lexical(query: str, chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
+    lexical_weight = float(os.getenv("RAG_LEXICAL_WEIGHT", str(DEFAULT_RAG_LEXICAL_WEIGHT)))
+    lexical_weight = max(0.0, min(1.0, lexical_weight))
+    semantic_weight = 1.0 - lexical_weight
+
+    scored_chunks = []
+    for chunk in chunks:
+        lexical_score = _lexical_overlap_score(query, chunk.content)
+        combined_score = semantic_weight * chunk.score + lexical_weight * lexical_score
+        scored_chunks.append((combined_score, lexical_score, chunk))
+
+    scored_chunks.sort(key=lambda item: (item[0], item[1], item[2].score), reverse=True)
+    return [item[2] for item in scored_chunks]
+
+
 def is_factual_question(user_message: str) -> bool:
     lowered = user_message.lower()
     if "?" in lowered:
@@ -258,6 +297,9 @@ def normalize_source_name(source_name: str | None) -> str | None:
 
 
 def source_matches_intent(payload: dict, intent: str) -> bool:
+    payload_intent = normalize_intent(str(payload.get("intent") or ""))
+    if payload_intent == intent:
+        return True
     source_name = normalize_source_name(payload.get("source_uri"))
     title_name = normalize_source_name(payload.get("title"))
     if source_name and (source_name == intent or source_name.startswith(f"{intent}_")):
@@ -320,6 +362,10 @@ def retrieve_rag_context(
 ) -> str:
     vector = embed_query(query)
     resolved_top_k = top_k or int(os.getenv("RAG_TOP_K", DEFAULT_RAG_TOP_K))
+    lexical_candidates = int(
+        os.getenv("RAG_LEXICAL_RERANK_CANDIDATES", str(DEFAULT_RAG_LEXICAL_RERANK_CANDIDATES))
+    )
+    retrieval_limit = max(resolved_top_k, lexical_candidates)
     collection = os.getenv("QDRANT_COLLECTION", DEFAULT_QDRANT_COLLECTION)
     score_threshold_env = os.getenv("RAG_SCORE_THRESHOLD")
     score_threshold = (
@@ -341,7 +387,7 @@ def retrieve_rag_context(
         resolved_top_k,
         score_threshold,
     )
-    chunks = search_qdrant(vector, resolved_top_k, score_threshold, normalized_intent)
+    chunks = search_qdrant(vector, retrieval_limit, score_threshold, normalized_intent)
     semantic_chunks = list(chunks)
     LOGGER.warning(
         "rag_search_results count=%s doc_ids=%s",
@@ -358,7 +404,7 @@ def retrieve_rag_context(
             )
             chunks = search_qdrant(
                 vector,
-                resolved_top_k,
+                retrieval_limit,
                 fallback_threshold,
                 normalized_intent,
             )
@@ -372,7 +418,7 @@ def retrieve_rag_context(
                 "rag_search_empty_retry intent=%s score_threshold=None",
                 normalized_intent or "none",
             )
-            chunks = search_qdrant(vector, resolved_top_k, None, normalized_intent)
+            chunks = search_qdrant(vector, retrieval_limit, None, normalized_intent)
             LOGGER.warning(
                 "rag_search_retry_results count=%s doc_ids=%s",
                 len(chunks),
@@ -399,7 +445,7 @@ def retrieve_rag_context(
         elif not filtered_chunks:
             LOGGER.warning("rag_intent_empty_fallback intent=%s", normalized_intent)
             LOGGER.warning("rag_intent_source_fallback intent=%s", normalized_intent)
-            chunks = search_qdrant(vector, resolved_top_k, score_threshold)
+            chunks = search_qdrant(vector, retrieval_limit, score_threshold)
             LOGGER.warning(
                 "rag_search_fallback_results count=%s doc_ids=%s",
                 len(chunks),
@@ -410,7 +456,7 @@ def retrieve_rag_context(
                     "rag_search_fallback_empty_retry intent=%s score_threshold=None",
                     normalized_intent,
                 )
-                chunks = search_qdrant(vector, resolved_top_k, None)
+                chunks = search_qdrant(vector, retrieval_limit, None)
                 LOGGER.warning(
                     "rag_search_fallback_retry_results count=%s doc_ids=%s",
                     len(chunks),
@@ -436,7 +482,13 @@ def retrieve_rag_context(
                 )
         if filtered_chunks:
             chunks = filtered_chunks
-    best_chunks = chunks[:2]
+    reranked_chunks = rerank_chunks_lexical(query, chunks)
+    LOGGER.warning(
+        "rag_rerank_applied total=%s selected=%s",
+        len(reranked_chunks),
+        min(2, len(reranked_chunks)),
+    )
+    best_chunks = reranked_chunks[:2]
     if best_chunks:
         for index, chunk in enumerate(best_chunks, start=1):
             LOGGER.warning(
