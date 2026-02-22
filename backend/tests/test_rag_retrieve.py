@@ -55,6 +55,7 @@ def test_retrieve_rag_context_keeps_semantic_results_when_intent_filter_is_empty
         raise AssertionError("No fallback search expected when semantic result exists")
 
     monkeypatch.setattr(retrieve, "search_qdrant", fake_search)
+    monkeypatch.setattr(retrieve, "keyword_search_bm25", lambda *_args, **_kwargs: [])
 
     context = retrieve.retrieve_rag_context(
         "Quel est le CPM du format Box mobile global ?",
@@ -121,6 +122,7 @@ def test_retrieve_rag_context_applies_rerank_before_selection(monkeypatch):
         ]
 
     monkeypatch.setattr(retrieve, "search_qdrant", fake_search)
+    monkeypatch.setattr(retrieve, "keyword_search_bm25", lambda *_args, **_kwargs: [])
 
     context = retrieve.retrieve_rag_context(
         "Combien coûte un communiqué de presse (prix de base) ?",
@@ -130,3 +132,17 @@ def test_retrieve_rag_context_applies_rerank_before_selection(monkeypatch):
 
     first_chunk = context.split("\n\n")[0]
     assert "prix de base" in first_chunk.lower()
+
+
+def test_rewrite_query_expands_communique_pricing_terms():
+    rewritten = retrieve.rewrite_query("Combien coûte un communiqué ?")
+
+    assert "prix" in rewritten.lower()
+    assert "tarif" in rewritten.lower()
+    assert "diffusion presse" in rewritten.lower()
+
+
+def test_response_indicates_not_found_patterns():
+    assert retrieve.response_indicates_not_found("Information not found in context")
+    assert retrieve.response_indicates_not_found("Not available")
+    assert not retrieve.response_indicates_not_found("Le prix est 600 DT HT")

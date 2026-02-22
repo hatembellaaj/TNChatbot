@@ -8,17 +8,27 @@ from typing import Iterable, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+import psycopg
+
 DEFAULT_QDRANT_URL = "http://localhost:6333"
-DEFAULT_QDRANT_COLLECTION = "tnchatbot_kb"
+DEFAULT_QDRANT_COLLECTION = "index_source"
 DEFAULT_EMBEDDING_URL = "http://localhost:8001/v1/embeddings"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
-DEFAULT_RAG_TOP_K = 6
+DEFAULT_RAG_TOP_K = 8
 DEFAULT_RAG_SCORE_THRESHOLD = 0.2
 DEFAULT_KB_SOURCES_DIR = "kb_sources"
 DEFAULT_RAG_CHUNK_SIZE = 400
 DEFAULT_RAG_CHUNK_OVERLAP = 80
 DEFAULT_RAG_LEXICAL_RERANK_CANDIDATES = 12
 DEFAULT_RAG_LEXICAL_WEIGHT = 0.35
+DEFAULT_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/postgres"
+DEFAULT_RAG_FALLBACK_TOP_K = 15
+DEFAULT_RRF_K = 60
+NOT_FOUND_PATTERNS = (
+    "information not found",
+    "i don't have information",
+    "not available",
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -142,6 +152,11 @@ class RagSelection:
     selected_chunks: List[dict]
 
 
+def get_connection() -> psycopg.Connection:
+    database_url = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+    return psycopg.connect(database_url)
+
+
 def chunk_text(text: str, max_tokens: int, overlap: int) -> List[str]:
     words = [word for word in text.split() if word.strip()]
     if not words:
@@ -258,6 +273,143 @@ def rerank_chunks_lexical(query: str, chunks: List[RetrievedChunk]) -> List[Retr
     return [item[2] for item in scored_chunks]
 
 
+def rewrite_query(query: str) -> str:
+    lowered = query.lower()
+    expansion_tokens: List[str] = []
+    if "coûte" in lowered or "coute" in lowered:
+        expansion_tokens.extend(["prix", "tarif"])
+    if "communiqué" in lowered or "communique" in lowered:
+        expansion_tokens.extend(["communiqué de presse", "CP", "diffusion presse"])
+    if "live" in lowered:
+        expansion_tokens.extend(["vidéo live", "couverture live", "Facebook", "YouTube"])
+    rewritten = " ".join(dict.fromkeys([query.strip(), *expansion_tokens])).strip()
+    return rewritten or query
+
+
+def keyword_search_bm25(query: str, top_k: int, intent: str | None = None) -> List[RetrievedChunk]:
+    query_terms = _tokenize_lexical(query)
+    if not query_terms:
+        return []
+    where_sql = ""
+    params: list[object] = []
+    if intent:
+        where_sql = "WHERE LOWER(COALESCE(d.source_uri, '')) LIKE %s"
+        params.append(f"%{intent}%")
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT c.id, c.content, d.source_uri, d.title
+            FROM kb_chunks c
+            JOIN kb_documents d ON c.document_id = d.id
+            {where_sql}
+            ORDER BY c.created_at DESC
+            LIMIT 3000
+            """,
+            params,
+        ).fetchall()
+    if not rows:
+        return []
+    docs_tokens: list[list[str]] = [_tokenize_lexical(row[1] or "") for row in rows]
+    avgdl = sum(len(tokens) for tokens in docs_tokens) / max(1, len(docs_tokens))
+    df: dict[str, int] = {}
+    for tokens in docs_tokens:
+        for token in set(tokens):
+            df[token] = df.get(token, 0) + 1
+
+    k1 = 1.5
+    b = 0.75
+    scored: list[tuple[float, tuple]] = []
+    for row, tokens in zip(rows, docs_tokens):
+        term_freq: dict[str, int] = {}
+        for token in tokens:
+            term_freq[token] = term_freq.get(token, 0) + 1
+        score = 0.0
+        doc_len = max(1, len(tokens))
+        for term in query_terms:
+            freq = term_freq.get(term, 0)
+            if freq == 0:
+                continue
+            n_qi = df.get(term, 0)
+            idf = max(0.0, (len(rows) - n_qi + 0.5) / (n_qi + 0.5))
+            denom = freq + k1 * (1 - b + b * doc_len / max(1.0, avgdl))
+            score += (idf * (freq * (k1 + 1))) / max(1e-6, denom)
+        if score > 0:
+            scored.append((score, row))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [
+        RetrievedChunk(
+            content=(row[1] or ""),
+            score=float(score),
+            payload={"source_uri": row[2], "title": row[3], "content": row[1]},
+            point_id=str(row[0]),
+        )
+        for score, row in scored[:top_k]
+    ]
+
+
+def reciprocal_rank_fusion(
+    vector_results: List[RetrievedChunk],
+    keyword_results: List[RetrievedChunk],
+    top_k: int,
+) -> List[RetrievedChunk]:
+    rrf_k = int(os.getenv("RAG_RRF_K", str(DEFAULT_RRF_K)))
+    fused_scores: dict[str, float] = {}
+    by_id: dict[str, RetrievedChunk] = {}
+    for rank, chunk in enumerate(vector_results, start=1):
+        chunk_id = str(chunk.point_id)
+        by_id[chunk_id] = chunk
+        fused_scores[chunk_id] = fused_scores.get(chunk_id, 0.0) + 1.0 / (rrf_k + rank)
+    for rank, chunk in enumerate(keyword_results, start=1):
+        chunk_id = str(chunk.point_id)
+        by_id.setdefault(chunk_id, chunk)
+        fused_scores[chunk_id] = fused_scores.get(chunk_id, 0.0) + 1.0 / (rrf_k + rank)
+    ordered_ids = sorted(fused_scores, key=fused_scores.get, reverse=True)
+    return [by_id[chunk_id] for chunk_id in ordered_ids[:top_k]]
+
+
+def rerank_chunks_cross_encoder(query: str, chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
+    if not chunks:
+        return chunks
+    cohere_api_key = os.getenv("COHERE_API_KEY")
+    if not cohere_api_key:
+        return rerank_chunks_lexical(query, chunks)
+    endpoint = "https://api.cohere.com/v2/rerank"
+    payload = {
+        "model": os.getenv("COHERE_RERANK_MODEL", "rerank-v3.5"),
+        "query": query,
+        "documents": [chunk.content for chunk in chunks],
+        "top_n": min(10, len(chunks)),
+    }
+    data = json.dumps(payload).encode("utf-8")
+    request = Request(
+        endpoint,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {cohere_api_key}",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        LOGGER.warning("cohere_rerank_failed_fallback_to_lexical", exc_info=True)
+        return rerank_chunks_lexical(query, chunks)
+    results = body.get("results", [])
+    if not results:
+        return rerank_chunks_lexical(query, chunks)
+    reranked = [chunks[item.get("index", 0)] for item in results if item.get("index") is not None]
+    seen = {id(chunk) for chunk in reranked}
+    reranked.extend([chunk for chunk in chunks if id(chunk) not in seen])
+    return reranked
+
+
+def response_indicates_not_found(text: str) -> bool:
+    lowered = text.lower()
+    return any(pattern in lowered for pattern in NOT_FOUND_PATTERNS)
+
+
 def is_factual_question(user_message: str) -> bool:
     lowered = user_message.lower()
     if "?" in lowered:
@@ -355,12 +507,23 @@ def classify_intent(user_message: str) -> str | None:
     return None
 
 
+
+
+def retrieve_debug(query: str, k: int = 10, intent: str | None = None) -> List[RetrievedChunk]:
+    rewritten_query = rewrite_query(query)
+    vector = embed_query(rewritten_query)
+    normalized_intent = normalize_intent(intent)
+    vector_results = search_qdrant(vector, k, None, normalized_intent)
+    keyword_results = keyword_search_bm25(rewritten_query, k, normalized_intent)
+    merged = reciprocal_rank_fusion(vector_results, keyword_results, k)
+    return rerank_chunks_cross_encoder(rewritten_query, merged)[:k]
 def retrieve_rag_context(
     query: str,
     top_k: int | None = None,
     intent: str | None = None,
 ) -> str:
-    vector = embed_query(query)
+    rewritten_query = rewrite_query(query)
+    vector = embed_query(rewritten_query)
     resolved_top_k = top_k or int(os.getenv("RAG_TOP_K", DEFAULT_RAG_TOP_K))
     lexical_candidates = int(
         os.getenv("RAG_LEXICAL_RERANK_CANDIDATES", str(DEFAULT_RAG_LEXICAL_RERANK_CANDIDATES))
@@ -388,6 +551,8 @@ def retrieve_rag_context(
         score_threshold,
     )
     chunks = search_qdrant(vector, retrieval_limit, score_threshold, normalized_intent)
+    keyword_chunks = keyword_search_bm25(rewritten_query, resolved_top_k, normalized_intent)
+    chunks = reciprocal_rank_fusion(chunks, keyword_chunks, resolved_top_k)
     semantic_chunks = list(chunks)
     LOGGER.warning(
         "rag_search_results count=%s doc_ids=%s",
@@ -482,13 +647,13 @@ def retrieve_rag_context(
                 )
         if filtered_chunks:
             chunks = filtered_chunks
-    reranked_chunks = rerank_chunks_lexical(query, chunks)
+    reranked_chunks = rerank_chunks_cross_encoder(rewritten_query, chunks)
     LOGGER.warning(
         "rag_rerank_applied total=%s selected=%s",
         len(reranked_chunks),
-        min(2, len(reranked_chunks)),
+        min(resolved_top_k, len(reranked_chunks)),
     )
-    best_chunks = reranked_chunks[:2]
+    best_chunks = reranked_chunks[:resolved_top_k]
     if best_chunks:
         for index, chunk in enumerate(best_chunks, start=1):
             LOGGER.warning(
