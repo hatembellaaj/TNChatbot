@@ -7,6 +7,7 @@ from app.main import (
     _build_direct_factual_answer,
     _extract_launch_year_from_context,
     _extract_visits_total_2024_from_context,
+    _extract_article_reads_2024_from_context,
 )
 
 
@@ -44,3 +45,21 @@ def test_build_direct_factual_answer_returns_visits_total_2024():
         rag_context,
     )
     assert answer == "En 2024, Tunisie Numérique a enregistré 46 000 000 visites au total."
+
+
+def test_extract_article_reads_2024_from_context_reads_json_value():
+    rag_context = '[5] {"audience_2024":{"high_level":{"article_reads_total":62400000}}}'
+    reads = _extract_article_reads_2024_from_context(
+        "Combien de lectures d’articles en 2024 ?",
+        rag_context,
+    )
+    assert reads == 62400000
+
+
+def test_build_direct_factual_answer_returns_article_reads_2024():
+    rag_context = '[5] Le site a généré 62 400 000 lectures d’articles en 2024.'
+    answer = _build_direct_factual_answer(
+        "Combien de lectures d’articles en 2024 ?",
+        rag_context,
+    )
+    assert answer == "En 2024, Tunisie Numérique a généré 62 400 000 lectures d’articles."

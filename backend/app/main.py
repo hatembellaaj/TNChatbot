@@ -150,6 +150,38 @@ def _extract_visits_total_2024_from_context(user_message: str, rag_context: str)
     return None
 
 
+
+
+def _extract_article_reads_2024_from_context(user_message: str, rag_context: str) -> int | None:
+    normalized_question = user_message.lower()
+    reads_keywords = ("lectures", "lecture", "articles", "article")
+    year_keywords = ("2024",)
+    if not any(keyword in normalized_question for keyword in reads_keywords):
+        return None
+    if not any(keyword in normalized_question for keyword in year_keywords):
+        return None
+
+    json_match = re.search(r'"article_reads_total"\s*:\s*(\d{5,})', rag_context)
+    if json_match:
+        return int(json_match.group(1))
+
+    sentence_match = re.search(
+        r"(?:en\s*2024[^.\n]{0,220})?(?:lectures?\s+d[’']articles|articles?)",
+        rag_context,
+        flags=re.IGNORECASE,
+    )
+    if sentence_match:
+        window_start = max(sentence_match.start() - 140, 0)
+        window_end = min(sentence_match.end() + 80, len(rag_context))
+        window = rag_context[window_start:window_end]
+        candidates = re.findall(r"\d[\d  ]{4,}", window)
+        values = [int(re.sub(r"\D", "", candidate)) for candidate in candidates]
+        if values:
+            return max(values)
+
+    return None
+
+
 def _build_direct_factual_answer(user_message: str, rag_context: str) -> str | None:
     launch_year = _extract_launch_year_from_context(user_message, rag_context)
     if launch_year:
@@ -160,6 +192,13 @@ def _build_direct_factual_answer(user_message: str, rag_context: str) -> str | N
         return (
             "En 2024, Tunisie Numérique a enregistré "
             f"{_format_int_fr(visits_total_2024)} visites au total."
+        )
+
+    article_reads_2024 = _extract_article_reads_2024_from_context(user_message, rag_context)
+    if article_reads_2024 is not None:
+        return (
+            "En 2024, Tunisie Numérique a généré "
+            f"{_format_int_fr(article_reads_2024)} lectures d’articles."
         )
     return None
 def initialize_db() -> None:
