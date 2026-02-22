@@ -24,7 +24,7 @@ Règles obligatoires :
 
 LOGGER = logging.getLogger(__name__)
 
-DEFAULT_PROMPT_MAX_TOKENS = 700
+DEFAULT_PROMPT_MAX_TOKENS = 1400
 
 DEVELOPER_PROMPT_TEMPLATE = """
 Étape courante: {step}

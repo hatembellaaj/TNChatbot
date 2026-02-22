@@ -93,6 +93,34 @@ class ChatStreamFinal(BaseModel):
     buttons: List[ChatButton]
 
 
+
+
+
+def _extract_launch_year_from_context(user_message: str, rag_context: str) -> str | None:
+    normalized_question = user_message.lower()
+    if not any(keyword in normalized_question for keyword in ("année", "annee", "lancement", "lancé", "lance", "création", "creation", "depuis")):
+        return None
+
+    since_match = re.search(r'"since"\s*:\s*"(\d{4})(?:-\d{2})?"', rag_context)
+    if since_match:
+        return since_match.group(1)
+
+    sentence_match = re.search(
+        r"tunisie\s+num[ée]rique[^.\n]{0,120}(?:lanc[ée]|lanc[ée]e?|cr[ée]ation|cr[ée]e?|depuis)[^.\n]{0,80}(\d{4})",
+        rag_context,
+        flags=re.IGNORECASE,
+    )
+    if sentence_match:
+        return sentence_match.group(1)
+
+    return None
+
+
+def _build_direct_factual_answer(user_message: str, rag_context: str) -> str | None:
+    launch_year = _extract_launch_year_from_context(user_message, rag_context)
+    if launch_year:
+        return f"Tunisie Numérique a été lancé en {launch_year}."
+    return None
 def initialize_db() -> None:
     global CHAT_MESSAGES_FK_TARGET, CHAT_SESSIONS_HAS_ID, CHAT_SESSIONS_HAS_SESSION_ID
     with get_connection() as conn:
@@ -469,6 +497,7 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
         try:
             selection = retrieve_rag_selection(
                 payload.user_message,
+                top_k=20,
                 intent=intent,
             )
             retrieved_context = selection.context
@@ -486,6 +515,20 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
         allowed_buttons = []
         LOGGER.info("rag_buttons_disabled reason=rag_context_present")
 
+    direct_factual_answer = _build_direct_factual_answer(payload.user_message, rag_context)
+    if direct_factual_answer:
+        LOGGER.info("rag_direct_factual_answer_used=true")
+        validated = {
+            "assistant_message": direct_factual_answer,
+            "buttons": [],
+            "suggested_next_step": next_step.value,
+            "slot_updates": {},
+            "handoff": {"requested": False},
+            "safety": {"flagged": False},
+        }
+    else:
+        validated = None
+
     rag_empty_factual = (
         rag_triggered and not rag_context and is_factual_question(payload.user_message)
     )
@@ -495,68 +538,68 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
         len(rag_context),
     )
 
-    messages = build_messages(
-        step=step,
-        allowed_buttons=allowed_buttons,
-        form_schema=form_schema,
-        config=config,
-        rag_context=rag_context,
-        rag_empty_factual=rag_empty_factual,
-        user_message=payload.user_message,
-    )
-
     default_next_step = next_step.value
 
-    try:
-        llm_response = call_llm(messages)
-
-        LOGGER.warning(
-            "llm_raw_response session_id=%s response=%s",
-            payload.session_id,
-            llm_response,
+    if validated is None:
+        messages = build_messages(
+            step=step,
+            allowed_buttons=allowed_buttons,
+            form_schema=form_schema,
+            config=config,
+            rag_context=rag_context,
+            rag_empty_factual=rag_empty_factual,
+            user_message=payload.user_message,
         )
 
-        if rag_triggered and response_indicates_not_found(llm_response):
-            LOGGER.warning("rag_not_found_detected retrying_with_higher_k")
-            retry_selection = retrieve_rag_selection(
-                payload.user_message,
-                top_k=15,
-                intent=intent,
+        try:
+            llm_response = call_llm(messages)
+
+            LOGGER.warning(
+                "llm_raw_response session_id=%s response=%s",
+                payload.session_id,
+                llm_response,
             )
-            if retry_selection.context:
-                rag_context = retry_selection.context
-                rag_selected_chunks = retry_selection.selected_chunks
-                retry_messages = build_messages(
-                    step=step,
-                    allowed_buttons=allowed_buttons,
-                    form_schema=form_schema,
-                    config=config,
-                    rag_context=rag_context,
-                    rag_empty_factual=False,
-                    user_message=payload.user_message,
+
+            if rag_triggered and response_indicates_not_found(llm_response):
+                LOGGER.warning("rag_not_found_detected retrying_with_higher_k")
+                retry_selection = retrieve_rag_selection(
+                    payload.user_message,
+                    top_k=30,
+                    intent=intent,
                 )
-                llm_response = call_llm(retry_messages)
-                LOGGER.warning(
-                    "llm_raw_response_retry session_id=%s response=%s",
-                    payload.session_id,
-                    llm_response,
-                )
+                if retry_selection.context:
+                    rag_context = retry_selection.context
+                    rag_selected_chunks = retry_selection.selected_chunks
+                    retry_messages = build_messages(
+                        step=step,
+                        allowed_buttons=allowed_buttons,
+                        form_schema=form_schema,
+                        config=config,
+                        rag_context=rag_context,
+                        rag_empty_factual=False,
+                        user_message=payload.user_message,
+                    )
+                    llm_response = call_llm(retry_messages)
+                    LOGGER.warning(
+                        "llm_raw_response_retry session_id=%s response=%s",
+                        payload.session_id,
+                        llm_response,
+                    )
 
-        validated = validate_or_fallback(
-            llm_response,
-            allowed_buttons,
-            default_next_step,
-            text_only=True,
-        )
+            validated = validate_or_fallback(
+                llm_response,
+                allowed_buttons,
+                default_next_step,
+                text_only=True,
+            )
 
-    except LLMClientError as exc:
-        LOGGER.error(
-            "llm_call_failed session_id=%s error=%s",
-            payload.session_id,
-            exc,
-        )
-        validated = build_fallback_response_with_step(default_next_step)
-
+        except LLMClientError as exc:
+            LOGGER.error(
+                "llm_call_failed session_id=%s error=%s",
+                payload.session_id,
+                exc,
+            )
+            validated = build_fallback_response_with_step(default_next_step)
 
     next_step = default_next_step
     buttons = get_buttons_for_step(resolved_step)
@@ -788,6 +831,7 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
         try:
             selection = retrieve_rag_selection(
                 payload.user_message,
+                top_k=20,
                 intent=intent,
             )
             retrieved_context = selection.context
@@ -805,6 +849,8 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
         allowed_buttons = []
         LOGGER.info("rag_buttons_disabled reason=rag_context_present")
 
+    direct_factual_answer = _build_direct_factual_answer(payload.user_message, rag_context)
+
     rag_empty_factual = (
         rag_triggered and not rag_context and is_factual_question(payload.user_message)
     )
@@ -816,15 +862,17 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
 
     default_next_step = next_step.value
 
-    messages = build_messages(
-        step=step,
-        allowed_buttons=allowed_buttons,
-        form_schema=form_schema,
-        config=config,
-        rag_context=rag_context,
-        rag_empty_factual=rag_empty_factual,
-        user_message=payload.user_message,
-    )
+    messages = None
+    if not direct_factual_answer:
+        messages = build_messages(
+            step=step,
+            allowed_buttons=allowed_buttons,
+            form_schema=form_schema,
+            config=config,
+            rag_context=rag_context,
+            rag_empty_factual=rag_empty_factual,
+            user_message=payload.user_message,
+        )
 
     async def event_stream() -> Any:
         LOGGER.info(
@@ -845,30 +893,41 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
 
         llm_error = None
         llm_start = time.monotonic()
-        llm_task = asyncio.create_task(asyncio.to_thread(call_llm, messages))
 
-        while True:
-            done, _ = await asyncio.wait({llm_task}, timeout=PING_INTERVAL_SECONDS)
-            if llm_task in done:
-                break
-            yield _format_sse("ping", {"ts": time.time()})
+        if direct_factual_answer:
+            validated = {
+                "assistant_message": direct_factual_answer,
+                "buttons": [],
+                "suggested_next_step": default_next_step,
+                "slot_updates": {},
+                "handoff": {"requested": False},
+                "safety": {"flagged": False},
+            }
+        else:
+            llm_task = asyncio.create_task(asyncio.to_thread(call_llm, messages))
 
-        try:
-            llm_response = await llm_task
-            validated = validate_or_fallback(
-                llm_response,
-                allowed_buttons,
-                default_next_step,
-                text_only=True,
-            )
-        except (LLMClientError, TimeoutError) as exc:
-            llm_error = str(exc)
-            validated = build_fallback_response_with_step(default_next_step)
-            LOGGER.warning(
-                "chat_stream_llm_error session_id=%s error=%s",
-                payload.session_id,
-                llm_error,
-            )
+            while True:
+                done, _ = await asyncio.wait({llm_task}, timeout=PING_INTERVAL_SECONDS)
+                if llm_task in done:
+                    break
+                yield _format_sse("ping", {"ts": time.time()})
+
+            try:
+                llm_response = await llm_task
+                validated = validate_or_fallback(
+                    llm_response,
+                    allowed_buttons,
+                    default_next_step,
+                    text_only=True,
+                )
+            except (LLMClientError, TimeoutError) as exc:
+                llm_error = str(exc)
+                validated = build_fallback_response_with_step(default_next_step)
+                LOGGER.warning(
+                    "chat_stream_llm_error session_id=%s error=%s",
+                    payload.session_id,
+                    llm_error,
+                )
 
         if llm_error:
             yield _format_sse("error", {"message": llm_error})
