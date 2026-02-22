@@ -439,8 +439,7 @@ export default function Home() {
                       minute: "2-digit",
                     })}
                   </div>
-                  {message.role === "assistant" &&
-                  (message.ragSelectedChunks?.length ?? 0) > 0 ? (
+                  {message.role === "assistant" ? (
                     <div className={styles.ragInspector}>
                       <button
                         type="button"
@@ -459,14 +458,18 @@ export default function Home() {
                         <div className={styles.ragPanel} data-testid="rag-panel">
                           <p className={styles.ragTitle}>Contexte envoyé au LLM</p>
                           <pre className={styles.ragContext}>
-                            {message.ragContext || "Contexte non disponible."}
+                            {message.ragContext || "Aucun contexte RAG envoyé au LLM pour cette réponse."}
                           </pre>
                           <p className={styles.ragTitle}>Chunks élus</p>
-                          <ol className={styles.ragChunkList}>
-                            {message.ragSelectedChunks?.map((chunk, index) => (
-                              <li key={`${message.id}-chunk-${index}`}>{chunk.content}</li>
-                            ))}
-                          </ol>
+                          {(message.ragSelectedChunks?.length ?? 0) > 0 ? (
+                            <ol className={styles.ragChunkList}>
+                              {message.ragSelectedChunks?.map((chunk, index) => (
+                                <li key={`${message.id}-chunk-${index}`}>{chunk.content}</li>
+                              ))}
+                            </ol>
+                          ) : (
+                            <p className={styles.ragEmpty}>Aucun chunk élu pour cette réponse.</p>
+                          )}
                         </div>
                       ) : null}
                     </div>

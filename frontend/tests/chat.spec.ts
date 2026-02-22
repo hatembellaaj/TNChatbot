@@ -197,3 +197,16 @@ test("inspection des chunks élus", async ({ page }) => {
   await expect(panel).toContainText("[1] Chunk A");
   await expect(panel).toContainText("[2] Chunk B");
 });
+
+
+test("affiche un message quand aucun chunk n'est élu", async ({ page }) => {
+  await page.goto("/");
+
+  const toggle = page.getByRole("button", { name: "Voir les chunks élus" }).first();
+  await expect(toggle).toBeVisible();
+  await toggle.click();
+
+  const panel = page.getByTestId("rag-panel").first();
+  await expect(panel).toContainText("Aucun contexte RAG envoyé au LLM pour cette réponse.");
+  await expect(panel).toContainText("Aucun chunk élu pour cette réponse.");
+});
