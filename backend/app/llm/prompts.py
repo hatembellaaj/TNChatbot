@@ -4,7 +4,8 @@ import re
 import json
 from typing import Any, Dict, List
 
-SYSTEM_PROMPT = """
+SYSTEM_PROMPT = (
+    """
 Tu réponds au nom de Tunisie Numérique (annonceurs).
 
 Règles obligatoires :
@@ -18,12 +19,12 @@ Règles obligatoires :
 - Ne réponds jamais de manière générique si le contexte contient l'information.
 - Réponds en texte simple (pas de JSON, pas de balises).
 - Tu ne produis jamais de structure JSON.
-"""
-.strip()
+""".strip()
+)
 
 LOGGER = logging.getLogger(__name__)
 
-DEFAULT_PROMPT_MAX_TOKENS = 250
+DEFAULT_PROMPT_MAX_TOKENS = 1400
 
 DEVELOPER_PROMPT_TEMPLATE = """
 Étape courante: {step}
@@ -35,6 +36,9 @@ Schéma de formulaire:
 
 Configuration:
 {config}
+
+Faits prioritaires extraits du contexte:
+{priority_facts}
 
 Contexte RAG:
 {rag_context}
@@ -56,6 +60,36 @@ def _trim_text_to_tokens(text: str, max_tokens: int) -> str:
     return " ".join(tokens[:max_tokens])
 
 
+
+
+def _sanitize_rag_context(rag_context: str) -> str:
+    """Nettoie les marqueurs parasites afin de préserver les valeurs factuelles."""
+    cleaned = rag_context.replace("🎬", " ").replace("!", " ")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip()
+
+
+def _extract_priority_facts(rag_context: str, user_message: str) -> str:
+    """Extrait des faits courts (notamment dates/chiffres) pour les questions factuelles."""
+    if not rag_context:
+        return ""
+
+    facts: List[str] = []
+    normalized_question = user_message.lower()
+
+    since_match = re.search(r'"since"\s*:\s*"(\d{4})(?:-\d{2})?"', rag_context)
+    if since_match and any(keyword in normalized_question for keyword in ("année", "lanc", "création", "depuis")):
+        facts.append(f"Année de lancement (champ since): {since_match.group(1)}")
+
+    sentence_match = re.search(
+        r"(?:lanc[eé]|cr[ée]e?|depuis)[^.\n]{0,60}(\d{4})",
+        rag_context,
+        flags=re.IGNORECASE,
+    )
+    if sentence_match and not any(sentence_match.group(1) in fact for fact in facts):
+        facts.append(f"Année mentionnée dans le contexte: {sentence_match.group(1)}")
+
+    return "\n".join(f"- {fact}" for fact in facts[:3])
 def _trim_rag_context(
     *,
     step: str,
@@ -72,6 +106,7 @@ def _trim_rag_context(
         allowed_buttons=", ".join(allowed_buttons),
         form_schema=_compact_json(form_schema, 80),
         config=_compact_json(config, 50),
+        priority_facts="",
         rag_context="",
         rag_empty_factual="oui" if rag_empty_factual else "non",
     )
@@ -140,6 +175,9 @@ def build_messages(
     rag_empty_factual: bool,
     user_message: str,
 ) -> List[Dict[str, str]]:
+    rag_context = _sanitize_rag_context(rag_context)
+    priority_facts = _extract_priority_facts(rag_context, user_message)
+
     rag_context = _trim_rag_context(
         step=step,
         allowed_buttons=allowed_buttons,
@@ -154,6 +192,7 @@ def build_messages(
         allowed_buttons=", ".join(allowed_buttons),
         form_schema=_compact_json(form_schema, 80),
         config=_compact_json(config, 50),
+        priority_facts=priority_facts or "- Aucun fait prioritaire extrait",
         rag_context=rag_context,
         rag_empty_factual="oui" if rag_empty_factual else "non",
     )
