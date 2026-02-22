@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import logging
 import os
 import queue
 import threading
@@ -24,6 +25,7 @@ from app.rag.ingest import (
 )
 
 ADMIN_CONFIG_KEYS = ("audience_metrics", "offers_copy", "email_config", "sectors")
+LOGGER = logging.getLogger(__name__)
 
 
 def _get_admin_password() -> str:
@@ -352,21 +354,35 @@ def delete_kb_document(document_id: str) -> Dict[str, Any]:
 
             cur.execute("DELETE FROM kb_documents WHERE id = %s", (doc_id,))
 
+    qdrant_deleted = True
+    qdrant_error: str | None = None
     if chunk_ids:
         try:
             delete_qdrant_points(chunk_ids)
         except Exception as exc:  # pragma: no cover
-            raise HTTPException(
-                status_code=502,
-                detail=f"Document supprimé en base, mais suppression Qdrant échouée: {exc}",
-            ) from exc
+            qdrant_deleted = False
+            qdrant_error = str(exc)
+            LOGGER.warning(
+                "kb_document_delete_qdrant_failed document_id=%s chunks=%s error=%s",
+                doc_id,
+                len(chunk_ids),
+                exc,
+            )
 
-    return {
+    response: Dict[str, Any] = {
         "ok": True,
         "document_id": str(doc_id),
         "title": title,
         "deleted_chunks": len(chunk_ids),
+        "qdrant_deleted": qdrant_deleted,
     }
+    if qdrant_error:
+        response["warning"] = (
+            "Document supprimé en base, mais la purge Qdrant a échoué. "
+            "Le document n'est plus visible côté application."
+        )
+        response["qdrant_error"] = qdrant_error
+    return response
 
 @router.get("/api/admin/kb/chunks")
 def get_kb_chunks(
