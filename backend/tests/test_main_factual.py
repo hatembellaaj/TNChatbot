@@ -5,6 +5,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2] / "backend"))
 
 from app.main import (
     _build_direct_factual_answer,
+    _extract_total_socionautes_from_context,
     _extract_launch_year_from_context,
     _extract_visits_total_2024_from_context,
     _extract_article_reads_2024_from_context,
@@ -63,3 +64,21 @@ def test_build_direct_factual_answer_returns_article_reads_2024():
         rag_context,
     )
     assert answer == "En 2024, Tunisie Numérique a généré 62 400 000 lectures d’articles."
+
+
+def test_extract_total_socionautes_from_context_reads_sentence_value():
+    rag_context = "Le kit média indique un total de +1 175 000 socionautes (septembre 2025)."
+    total = _extract_total_socionautes_from_context(
+        "Combien y a-t-il de socionautes au total ?",
+        rag_context,
+    )
+    assert total == 1175000
+
+
+def test_build_direct_factual_answer_returns_socionautes_total():
+    rag_context = "Le kit média indique un total de +1 175 000 socionautes (septembre 2025)."
+    answer = _build_direct_factual_answer(
+        "Combien y a-t-il de socionautes au total ?",
+        rag_context,
+    )
+    assert answer == "Le total de socionautes est de 1 175 000."

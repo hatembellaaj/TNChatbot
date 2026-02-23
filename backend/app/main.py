@@ -182,6 +182,35 @@ def _extract_article_reads_2024_from_context(user_message: str, rag_context: str
     return None
 
 
+def _extract_total_socionautes_from_context(user_message: str, rag_context: str) -> int | None:
+    normalized_question = user_message.lower()
+    social_keywords = (
+        "socionautes",
+        "réseaux sociaux",
+        "reseaux sociaux",
+        "social media",
+    )
+    total_keywords = ("total", "au total", "globale", "global")
+    if not any(keyword in normalized_question for keyword in social_keywords):
+        return None
+    if not any(keyword in normalized_question for keyword in total_keywords):
+        return None
+
+    json_match = re.search(r'"socionautes_total"\s*:\s*(\d{4,})', rag_context)
+    if json_match:
+        return int(json_match.group(1))
+
+    sentence_match = re.search(
+        r"(?:\+\s*)?(\d[\d\s\u00A0]{4,})\s+socionautes",
+        rag_context,
+        flags=re.IGNORECASE,
+    )
+    if sentence_match:
+        return int(re.sub(r"\D", "", sentence_match.group(1)))
+
+    return None
+
+
 def _build_direct_factual_answer(user_message: str, rag_context: str) -> str | None:
     launch_year = _extract_launch_year_from_context(user_message, rag_context)
     if launch_year:
@@ -200,6 +229,10 @@ def _build_direct_factual_answer(user_message: str, rag_context: str) -> str | N
             "En 2024, Tunisie Numérique a généré "
             f"{_format_int_fr(article_reads_2024)} lectures d’articles."
         )
+
+    total_socionautes = _extract_total_socionautes_from_context(user_message, rag_context)
+    if total_socionautes is not None:
+        return f"Le total de socionautes est de {_format_int_fr(total_socionautes)}."
     return None
 def initialize_db() -> None:
     global CHAT_MESSAGES_FK_TARGET, CHAT_SESSIONS_HAS_ID, CHAT_SESSIONS_HAS_SESSION_ID
