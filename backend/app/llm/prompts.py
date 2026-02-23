@@ -14,6 +14,8 @@ Règles obligatoires :
 - N'invente jamais d'information (aucun chiffre ni détail absent du contexte).
 - Les données présentes dans le contexte RAG (y compris clés JSON et valeurs numériques) font foi.
 - Si une valeur numérique ou un champ est présent dans le contexte, tu dois l'utiliser pour répondre.
+- Accepte les variations mineures de formulation entre la question et le contexte (accents, singulier/pluriel, anglais/français, orthographe proche) et fais la correspondance la plus probable.
+- Si une ligne du contexte correspond clairement à la demande (même avec une formulation légèrement différente), réponds avec cette valeur au lieu de dire que l'information est introuvable.
 - Tu peux reformuler les données du contexte en phrase naturelle.
 - Si une information demandée n’est réellement pas présente dans le contexte, indique clairement que l'information n'est pas disponible dans le kit média.
 - Ne réponds jamais de manière générique si le contexte contient l'information.
