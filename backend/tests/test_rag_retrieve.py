@@ -146,3 +146,36 @@ def test_response_indicates_not_found_patterns():
     assert retrieve.response_indicates_not_found("Information not found in context")
     assert retrieve.response_indicates_not_found("Not available")
     assert not retrieve.response_indicates_not_found("Le prix est 600 DT HT")
+
+
+def test_retrieve_rag_context_intent_file_fallback_keeps_multiple_chunks(monkeypatch):
+    monkeypatch.setattr(retrieve, "embed_query", lambda *_args, **_kwargs: [0.1, 0.2])
+    monkeypatch.setattr(retrieve, "search_qdrant", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(retrieve, "keyword_search_bm25", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        retrieve,
+        "load_intent_chunks",
+        lambda *_args, **_kwargs: [
+            retrieve.RetrievedChunk(
+                content="Audience 2024 : 64% hommes",
+                score=1.0,
+                payload={"source_uri": "AUDIENCE_2024.txt", "title": "AUDIENCE_2024"},
+                point_id="f1",
+            ),
+            retrieve.RetrievedChunk(
+                content="Audience 2024 : 36% femmes",
+                score=1.0,
+                payload={"source_uri": "AUDIENCE_2024.txt", "title": "AUDIENCE_2024"},
+                point_id="f2",
+            ),
+        ],
+    )
+
+    context = retrieve.retrieve_rag_context(
+        "Quel est le pourcentage d’hommes dans l’audience 2024 ?",
+        top_k=2,
+        intent="audience",
+    )
+
+    assert "64% hommes" in context
+    assert "36% femmes" in context
