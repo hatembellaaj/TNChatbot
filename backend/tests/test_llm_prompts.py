@@ -42,3 +42,19 @@ def test_build_messages_sanitizes_noisy_rag_markers():
     developer_prompt = messages[1]["content"]
     assert "🎬" not in developer_prompt
     assert "!" not in developer_prompt
+
+
+def test_system_prompt_mentions_flexible_matching_for_rag_wording():
+    messages = build_messages(
+        step="MAIN_MENU",
+        allowed_buttons=[],
+        form_schema={},
+        config={},
+        rag_context="Photo coverage coûte 1000 DT HT.",
+        rag_empty_factual=False,
+        user_message="combien coute une photo coverage",
+    )
+
+    system_prompt = messages[0]["content"]
+    assert "variations mineures de formulation" in system_prompt
+    assert "formulation légèrement différente" in system_prompt
