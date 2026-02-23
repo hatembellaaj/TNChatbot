@@ -639,7 +639,7 @@ def retrieve_rag_context(
             )
             if not filtered_chunks:
                 LOGGER.warning("rag_intent_file_fallback intent=%s", normalized_intent)
-                filtered_chunks = load_intent_chunks(normalized_intent)[:1]
+                filtered_chunks = load_intent_chunks(normalized_intent)[:resolved_top_k]
                 LOGGER.warning(
                     "rag_intent_file_fallback_results count=%s intent=%s",
                     len(filtered_chunks),
