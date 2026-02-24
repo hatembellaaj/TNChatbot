@@ -108,3 +108,14 @@ def test_build_direct_factual_answer_returns_pricing_sentence_when_present():
         rag_context,
     )
     assert answer == "Photo coverage coûte 1000 DT HT."
+
+
+def test_build_direct_factual_answer_strips_chunk_source_prefix_for_pricing():
+    rag_context = """
+    [2] (source: tn_kit_media_2025_RAG_ULTRA_EXHAUSTIVE_LOCKED — admin/upload/tn_kit_media_2025_RAG_ULTRA_EXHAUSTIVE_LOCKED.json) Photo coverage coûte 1000 DT HT.
+    """
+    answer = _build_direct_factual_answer(
+        "combien coute une photo coverage pour un évènement",
+        rag_context,
+    )
+    assert answer == "Photo coverage coûte 1000 DT HT."

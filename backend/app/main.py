@@ -219,6 +219,14 @@ def _extract_total_socionautes_from_context(user_message: str, rag_context: str)
     return None
 
 
+
+
+def _strip_chunk_metadata_prefix(line: str) -> str:
+    cleaned = re.sub(r"^\s*\[\d+\]\s*\(source:[^)]*\)\s*", "", line, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^\s*\[\d+\]\s*", "", cleaned)
+    return cleaned.strip()
+
+
 def _extract_pricing_sentence_from_context(user_message: str, rag_context: str) -> str | None:
     normalized_question = _normalize_for_match(user_message)
     if not any(token in normalized_question for token in ("combien", "coute", "cout", "prix", "tarif")):
@@ -236,13 +244,14 @@ def _extract_pricing_sentence_from_context(user_message: str, rag_context: str) 
     best_overlap = 0
     lines = [line.strip(" -\n\t") for line in re.split(r"[\n|]", rag_context) if line.strip()]
     for line in lines:
-        normalized_line = _normalize_for_match(line)
+        clean_line = _strip_chunk_metadata_prefix(line)
+        normalized_line = _normalize_for_match(clean_line)
         if not re.search(r"\b\d+[\d\s]*(?:dt|dinar|tnd|€|eur)\b", normalized_line):
             continue
         overlap = sum(1 for token in question_tokens if token in normalized_line)
         if overlap > best_overlap:
             best_overlap = overlap
-            best_line = line
+            best_line = clean_line
 
     if best_overlap == 0 or not best_line:
         return None
