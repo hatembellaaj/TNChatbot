@@ -204,3 +204,20 @@ def test_launch_year_question_uses_rag_since_without_llm(monkeypatch):
 
     assert "2010" in response["assistant_message"]
     assert response["safety"]["rag_used"] is True
+
+
+def test_match_button_id_supports_truncated_menu_label():
+    button_id = sm.match_button_id(
+        sm.ConversationStep.MAIN_MENU,
+        "🧩 Voir nos solutions pub",
+    )
+    assert button_id == "M_SOLUTIONS"
+
+
+def test_main_menu_text_selection_starts_budget_wizard():
+    button_id = sm.match_button_id(
+        sm.ConversationStep.MAIN_MENU,
+        "💰 M’aider à choisir",
+    )
+    next_step = sm.resolve_next_step(sm.ConversationStep.MAIN_MENU, button_id, None)
+    assert next_step == sm.ConversationStep.BUDGET_CLIENT_TYPE
