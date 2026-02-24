@@ -14,8 +14,8 @@ DEFAULT_QDRANT_URL = "http://localhost:6333"
 DEFAULT_QDRANT_COLLECTION = "index_source"
 DEFAULT_EMBEDDING_URL = "http://localhost:8001/v1/embeddings"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
-DEFAULT_RAG_TOP_K = 8
-DEFAULT_RAG_SCORE_THRESHOLD = 0.2
+DEFAULT_RAG_TOP_K = 3
+DEFAULT_RAG_SCORE_THRESHOLD = 0.45
 DEFAULT_KB_SOURCES_DIR = "kb_sources"
 DEFAULT_RAG_CHUNK_SIZE = 400
 DEFAULT_RAG_CHUNK_OVERLAP = 80
@@ -221,7 +221,7 @@ def search_qdrant(
 def build_rag_context(chunks: Iterable[RetrievedChunk]) -> str:
     lines: List[str] = []
     for index, chunk in enumerate(chunks, start=1):
-        content = chunk.content.strip()
+        content = _compact_chunk_content(chunk.content)
         if not content:
             continue
         title = chunk.payload.get("title")
@@ -235,6 +235,76 @@ def build_rag_context(chunks: Iterable[RetrievedChunk]) -> str:
             source_label = f" (source: {source_uri})"
         lines.append(f"[{index}]{source_label} {content}")
     return "\n\n".join(lines)
+
+
+def _compact_chunk_content(content: str, *, max_chars: int = 700, max_text_items: int = 12) -> str:
+    """Réduit les fragments JSON volumineux pour garder les faits lisibles dans le prompt."""
+    compact = content.strip()
+    if not compact:
+        return ""
+
+    text_matches = re.findall(r'"text"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', compact)
+    if text_matches:
+        decoded_items: List[str] = []
+        for item in text_matches:
+            try:
+                decoded = json.loads(f'"{item}"')
+            except json.JSONDecodeError:
+                decoded = item
+            normalized = re.sub(r"\s+", " ", decoded).strip()
+            if normalized:
+                decoded_items.append(normalized)
+        if decoded_items:
+            return " | ".join(decoded_items[:max_text_items])[:max_chars].strip()
+
+    compact = re.sub(r"\s+", " ", compact)
+    return compact[:max_chars].strip()
+
+
+def _focus_chunk_content_for_query(query: str, content: str, *, max_lines: int = 4) -> str:
+    """Conserve en priorité les lignes pertinentes pour la requête (ex: tarifs demandés)."""
+    compact = content.strip()
+    if not compact:
+        return ""
+
+    candidates: List[str] = []
+    text_matches = re.findall(r'"text"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', compact)
+    if text_matches:
+        for item in text_matches:
+            try:
+                decoded = json.loads(f'"{item}"')
+            except json.JSONDecodeError:
+                decoded = item
+            normalized = re.sub(r"\s+", " ", decoded).strip()
+            if normalized:
+                candidates.append(normalized)
+
+    if not candidates:
+        return _compact_chunk_content(compact)
+
+    query_tokens = {
+        token
+        for token in _tokenize_lexical(query)
+        if len(token) > 2 and token not in {"combien", "coute", "prix", "tarif"}
+    }
+
+    scored: List[tuple[float, str]] = []
+    for line in candidates:
+        normalized_line = _tokenize_lexical(line)
+        token_set = set(normalized_line)
+        overlap = sum(1 for token in query_tokens if token in token_set)
+        has_price = 1 if re.search(r"\b\d+[\d\s]*(dt|dinar|tnd|€|eur)\b", line.lower()) else 0
+        startswith_focus = 1 if ("photo" in token_set and "coverage" in token_set) else 0
+        score = startswith_focus * 10 + overlap * 3 + has_price
+        if score > 0:
+            scored.append((score, line))
+
+    if not scored:
+        return _compact_chunk_content(compact)
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    selected = [line for _, line in scored[:max_lines]]
+    return " | ".join(selected)
 
 
 def should_trigger_rag(intent: Optional[str], user_message: str) -> bool:
@@ -655,6 +725,8 @@ def retrieve_rag_context(
     )
     best_chunks = reranked_chunks[:resolved_top_k]
     if best_chunks:
+        for chunk in best_chunks:
+            chunk.content = _focus_chunk_content_for_query(rewritten_query, chunk.content)
         for index, chunk in enumerate(best_chunks, start=1):
             LOGGER.warning(
                 "rag_chunk_selected index=%s score=%.4f source=%s",
