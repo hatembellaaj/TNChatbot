@@ -5,6 +5,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2] / "backend"))
 
 from app.main import (
     _build_direct_factual_answer,
+    _extract_pricing_sentence_from_context,
     _extract_total_socionautes_from_context,
     _extract_launch_year_from_context,
     _extract_visits_total_2024_from_context,
@@ -82,3 +83,28 @@ def test_build_direct_factual_answer_returns_socionautes_total():
         rag_context,
     )
     assert answer == "Le total de socionautes est de 1 175 000."
+
+
+def test_extract_pricing_sentence_from_context_matches_photo_coverage():
+    rag_context = """
+    Un communiqué de presse coûte 600 DT HT.
+    Photo coverage coûte 1000 DT HT.
+    Video report branded tn coûte 3500 DT HT.
+    """
+    pricing_sentence = _extract_pricing_sentence_from_context(
+        "combien coute une photo coverage pour un évènement",
+        rag_context,
+    )
+    assert pricing_sentence == "Photo coverage coûte 1000 DT HT."
+
+
+def test_build_direct_factual_answer_returns_pricing_sentence_when_present():
+    rag_context = """
+    Un communiqué de presse coûte 600 DT HT.
+    Photo coverage coûte 1000 DT HT.
+    """
+    answer = _build_direct_factual_answer(
+        "combien coute une photo coverage pour un évènement",
+        rag_context,
+    )
+    assert answer == "Photo coverage coûte 1000 DT HT."
