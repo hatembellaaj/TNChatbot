@@ -5,6 +5,7 @@ import os
 import re
 import time
 import uuid
+import unicodedata
 from typing import Any, Dict, List
 
 from fastapi import FastAPI, HTTPException
@@ -121,6 +122,12 @@ def _format_int_fr(value: int) -> str:
     return f"{value:,}".replace(",", " ")
 
 
+def _normalize_for_match(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value.lower())
+    no_accents = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9\s]", " ", no_accents)
+
+
 def _extract_visits_total_2024_from_context(user_message: str, rag_context: str) -> int | None:
     normalized_question = user_message.lower()
     visits_keywords = ("visites", "trafic")
@@ -212,6 +219,45 @@ def _extract_total_socionautes_from_context(user_message: str, rag_context: str)
     return None
 
 
+
+
+def _strip_chunk_metadata_prefix(line: str) -> str:
+    cleaned = re.sub(r"^\s*\[\d+\]\s*\(source:[^)]*\)\s*", "", line, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^\s*\[\d+\]\s*", "", cleaned)
+    return cleaned.strip()
+
+
+def _extract_pricing_sentence_from_context(user_message: str, rag_context: str) -> str | None:
+    normalized_question = _normalize_for_match(user_message)
+    if not any(token in normalized_question for token in ("combien", "coute", "cout", "prix", "tarif")):
+        return None
+
+    question_tokens = {
+        token
+        for token in normalized_question.split()
+        if len(token) > 2 and token not in {"combien", "coute", "cout", "prix", "tarif", "une", "pour", "les"}
+    }
+    if not question_tokens:
+        return None
+
+    best_line = ""
+    best_overlap = 0
+    lines = [line.strip(" -\n\t") for line in re.split(r"[\n|]", rag_context) if line.strip()]
+    for line in lines:
+        clean_line = _strip_chunk_metadata_prefix(line)
+        normalized_line = _normalize_for_match(clean_line)
+        if not re.search(r"\b\d+[\d\s]*(?:dt|dinar|tnd|€|eur)\b", normalized_line):
+            continue
+        overlap = sum(1 for token in question_tokens if token in normalized_line)
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_line = clean_line
+
+    if best_overlap == 0 or not best_line:
+        return None
+    return best_line.rstrip(".") + "."
+
+
 def _build_direct_factual_answer(user_message: str, rag_context: str) -> str | None:
     launch_year = _extract_launch_year_from_context(user_message, rag_context)
     if launch_year:
@@ -234,6 +280,10 @@ def _build_direct_factual_answer(user_message: str, rag_context: str) -> str | N
     total_socionautes = _extract_total_socionautes_from_context(user_message, rag_context)
     if total_socionautes is not None:
         return f"Le total de socionautes est de {_format_int_fr(total_socionautes)}."
+
+    pricing_sentence = _extract_pricing_sentence_from_context(user_message, rag_context)
+    if pricing_sentence:
+        return pricing_sentence
     return None
 def initialize_db() -> None:
     global CHAT_MESSAGES_FK_TARGET, CHAT_SESSIONS_HAS_ID, CHAT_SESSIONS_HAS_SESSION_ID
