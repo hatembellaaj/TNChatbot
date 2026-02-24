@@ -3,6 +3,7 @@ import os
 import re
 import json
 from typing import Any, Dict, List
+import unicodedata
 
 SYSTEM_PROMPT = (
     """
@@ -91,7 +92,47 @@ def _extract_priority_facts(rag_context: str, user_message: str) -> str:
     if sentence_match and not any(sentence_match.group(1) in fact for fact in facts):
         facts.append(f"Année mentionnée dans le contexte: {sentence_match.group(1)}")
 
+    pricing_fact = _extract_pricing_fact(rag_context, user_message)
+    if pricing_fact:
+        facts.append(pricing_fact)
+
     return "\n".join(f"- {fact}" for fact in facts[:3])
+
+
+def _normalize_for_match(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value.lower())
+    no_accents = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9\s]", " ", no_accents)
+
+
+def _extract_pricing_fact(rag_context: str, user_message: str) -> str:
+    question = _normalize_for_match(user_message)
+    question_tokens = {
+        token
+        for token in question.split()
+        if len(token) > 2 and token not in {"combien", "coute", "cout", "prix", "tarif", "une", "pour"}
+    }
+    if not question_tokens:
+        return ""
+
+    best_line = ""
+    best_overlap = 0
+    candidates = re.split(r"(?<=[.!?])\s+", rag_context)
+    for candidate in candidates:
+        line = candidate.strip()
+        if len(line) < 5:
+            continue
+        if not re.search(r"\b\d+[\d\s]*(?:dt|dinar|tnd|€|eur)\b", _normalize_for_match(line)):
+            continue
+        normalized_line = _normalize_for_match(line)
+        overlap = sum(1 for token in question_tokens if token in normalized_line)
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_line = line
+
+    if best_overlap == 0 or not best_line:
+        return ""
+    return f"Tarif pertinent trouvé: {best_line}"
 def _trim_rag_context(
     *,
     step: str,

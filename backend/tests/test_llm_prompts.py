@@ -58,3 +58,24 @@ def test_system_prompt_mentions_flexible_matching_for_rag_wording():
     system_prompt = messages[0]["content"]
     assert "variations mineures de formulation" in system_prompt
     assert "formulation légèrement différente" in system_prompt
+
+
+def test_build_messages_extracts_relevant_pricing_fact_for_user_question():
+    rag_context = """
+    Une publication vidéo sur Facebook coûte 600 DT HT.
+    Photo coverage coûte 1000 DT HT.
+    Video report branded tn coûte 3500 DT HT.
+    """
+
+    messages = build_messages(
+        step="MAIN_MENU",
+        allowed_buttons=[],
+        form_schema={},
+        config={},
+        rag_context=rag_context,
+        rag_empty_factual=False,
+        user_message="combien coute une photo coverage",
+    )
+
+    developer_prompt = messages[1]["content"]
+    assert "Tarif pertinent trouvé: Photo coverage coûte 1000 DT HT." in developer_prompt
