@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable, List, Optional
 from urllib.error import HTTPError, URLError
@@ -737,9 +737,14 @@ def retrieve_rag_context(
     )
     best_chunks = reranked_chunks[:resolved_top_k]
     if best_chunks:
-        for chunk in best_chunks:
-            chunk.content = _focus_chunk_content_for_query(rewritten_query, chunk.content)
-        for index, chunk in enumerate(best_chunks, start=1):
+        focused_chunks = [
+            replace(
+                chunk,
+                content=_focus_chunk_content_for_query(rewritten_query, chunk.content),
+            )
+            for chunk in best_chunks
+        ]
+        for index, chunk in enumerate(focused_chunks, start=1):
             LOGGER.warning(
                 "rag_chunk_selected index=%s score=%.4f source=%s",
                 index,
@@ -747,6 +752,7 @@ def retrieve_rag_context(
                 chunk.payload.get("source_uri", "unknown"),
             )
             LOGGER.warning("rag_context_sent_to_llm index=%s content=%s", index, chunk.content)
+        best_chunks = focused_chunks
     else:
         LOGGER.warning("rag_no_chunk_selected")
     return build_rag_context(best_chunks)
