@@ -221,7 +221,7 @@ def search_qdrant(
 def build_rag_context(chunks: Iterable[RetrievedChunk]) -> str:
     lines: List[str] = []
     for index, chunk in enumerate(chunks, start=1):
-        content = chunk.content.strip()
+        content = _compact_chunk_content(chunk.content)
         if not content:
             continue
         title = chunk.payload.get("title")
@@ -235,6 +235,30 @@ def build_rag_context(chunks: Iterable[RetrievedChunk]) -> str:
             source_label = f" (source: {source_uri})"
         lines.append(f"[{index}]{source_label} {content}")
     return "\n\n".join(lines)
+
+
+def _compact_chunk_content(content: str, *, max_chars: int = 700, max_text_items: int = 8) -> str:
+    """Réduit les fragments JSON volumineux pour garder les faits lisibles dans le prompt."""
+    compact = content.strip()
+    if not compact:
+        return ""
+
+    text_matches = re.findall(r'"text"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', compact)
+    if text_matches:
+        decoded_items: List[str] = []
+        for item in text_matches:
+            try:
+                decoded = bytes(item, "utf-8").decode("unicode_escape")
+            except UnicodeDecodeError:
+                decoded = item
+            normalized = re.sub(r"\s+", " ", decoded).strip()
+            if normalized:
+                decoded_items.append(normalized)
+        if decoded_items:
+            return " | ".join(decoded_items[:max_text_items])[:max_chars].strip()
+
+    compact = re.sub(r"\s+", " ", compact)
+    return compact[:max_chars].strip()
 
 
 def should_trigger_rag(intent: Optional[str], user_message: str) -> bool:
