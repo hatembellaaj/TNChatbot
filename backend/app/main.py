@@ -610,7 +610,7 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
         try:
             selection = retrieve_rag_selection(
                 payload.user_message,
-                top_k=20,
+                top_k=int(os.getenv("RAG_CHAT_TOP_K", "3")),
                 intent=intent,
             )
             retrieved_context = selection.context
@@ -944,7 +944,7 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
         try:
             selection = retrieve_rag_selection(
                 payload.user_message,
-                top_k=20,
+                top_k=int(os.getenv("RAG_CHAT_TOP_K", "3")),
                 intent=intent,
             )
             retrieved_context = selection.context
