@@ -128,6 +128,15 @@ def _normalize_for_match(value: str) -> str:
     return re.sub(r"[^a-z0-9\s]", " ", no_accents)
 
 
+
+
+def _token_matches_line(token: str, normalized_line: str) -> bool:
+    if token in normalized_line:
+        return True
+    if token.endswith("e") and len(token) > 4 and token[:-1] in normalized_line:
+        return True
+    return False
+
 def _extract_visits_total_2024_from_context(user_message: str, rag_context: str) -> int | None:
     normalized_question = user_message.lower()
     visits_keywords = ("visites", "trafic")
@@ -248,12 +257,41 @@ def _extract_pricing_sentence_from_context(user_message: str, rag_context: str) 
         normalized_line = _normalize_for_match(clean_line)
         if not re.search(r"\b\d+[\d\s]*(?:dt|dinar|tnd|€|eur)\b", normalized_line):
             continue
-        overlap = sum(1 for token in question_tokens if token in normalized_line)
+        overlap = sum(1 for token in question_tokens if _token_matches_line(token, normalized_line))
         if overlap > best_overlap:
             best_overlap = overlap
             best_line = clean_line
 
     if best_overlap == 0 or not best_line:
+        return None
+    return best_line.rstrip(".") + "."
+
+
+def _extract_cpm_sentence_from_context(user_message: str, rag_context: str) -> str | None:
+    normalized_question = _normalize_for_match(user_message)
+    if "cpm" not in normalized_question:
+        return None
+
+    question_tokens = {
+        token
+        for token in normalized_question.split()
+        if len(token) > 2 and token not in {"quel", "quelle", "est", "du", "de", "la", "le", "les", "des", "pour", "cpm"}
+    }
+
+    best_line = ""
+    best_overlap = 0
+    lines = [line.strip(" -\n\t") for line in re.split(r"[\n|]", rag_context) if line.strip()]
+    for line in lines:
+        clean_line = _strip_chunk_metadata_prefix(line)
+        normalized_line = _normalize_for_match(clean_line)
+        if "cpm" not in normalized_line:
+            continue
+        overlap = sum(1 for token in question_tokens if _token_matches_line(token, normalized_line))
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_line = clean_line
+
+    if not best_line:
         return None
     return best_line.rstrip(".") + "."
 
@@ -284,6 +322,10 @@ def _build_direct_factual_answer(user_message: str, rag_context: str) -> str | N
     pricing_sentence = _extract_pricing_sentence_from_context(user_message, rag_context)
     if pricing_sentence:
         return pricing_sentence
+
+    cpm_sentence = _extract_cpm_sentence_from_context(user_message, rag_context)
+    if cpm_sentence:
+        return cpm_sentence
     return None
 def initialize_db() -> None:
     global CHAT_MESSAGES_FK_TARGET, CHAT_SESSIONS_HAS_ID, CHAT_SESSIONS_HAS_SESSION_ID
