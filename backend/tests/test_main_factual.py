@@ -5,6 +5,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2] / "backend"))
 
 from app.main import (
     _build_direct_factual_answer,
+    _extract_cpm_sentence_from_context,
     _extract_pricing_sentence_from_context,
     _extract_total_socionautes_from_context,
     _extract_launch_year_from_context,
@@ -119,3 +120,26 @@ def test_build_direct_factual_answer_strips_chunk_source_prefix_for_pricing():
         rag_context,
     )
     assert answer == "Photo coverage coûte 1000 DT HT."
+
+
+def test_extract_cpm_sentence_from_context_matches_box_mobile_global():
+    rag_context = """
+    [1] (source: tn_kit_media_2025_RAG_ULTRA_EXHAUSTIVE_LOCKED — admin/upload/tn_kit_media_2025_RAG_ULTRA_EXHAUSTIVE_LOCKED.json) Le format publicitaire box 300x250 en display mobile targeted coûte 3 250 DT HT par week avec un CPM de 47 DT HT. | Le format publicitaire intro 300x300 en display mobile global coûte 1 200 DT HT par day avec un CPM de 80 DT HT.
+    [2] (source: tn_kit_media_2025_RAG_ULTRA_EXHAUSTIVE_LOCKED — admin/upload/tn_kit_media_2025_RAG_ULTRA_EXHAUSTIVE_LOCKED.json) Le format publicitaire box 300x250 en display mobile global coûte 2 500 DT HT par week avec un CPM de 36 DT HT.
+    """
+    sentence = _extract_cpm_sentence_from_context(
+        "Quel est le CPM de la Box mobile globale ?",
+        rag_context,
+    )
+    assert sentence == "Le format publicitaire box 300x250 en display mobile global coûte 2 500 DT HT par week avec un CPM de 36 DT HT."
+
+
+def test_build_direct_factual_answer_returns_cpm_sentence_when_cpm_question():
+    rag_context = """
+    [2] (source: tn_kit_media_2025_RAG_ULTRA_EXHAUSTIVE_LOCKED — admin/upload/tn_kit_media_2025_RAG_ULTRA_EXHAUSTIVE_LOCKED.json) Le format publicitaire box 300x250 en display mobile global coûte 2 500 DT HT par week avec un CPM de 36 DT HT.
+    """
+    answer = _build_direct_factual_answer(
+        "Quel est le CPM de la Box mobile globale ?",
+        rag_context,
+    )
+    assert answer == "Le format publicitaire box 300x250 en display mobile global coûte 2 500 DT HT par week avec un CPM de 36 DT HT."
