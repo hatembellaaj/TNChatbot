@@ -664,9 +664,28 @@ def match_button_id(step: ConversationStep, user_message: str) -> Optional[str]:
     normalized = normalize_text(user_message)
     if not normalized:
         return None
+
+    def _matches(label: str) -> bool:
+        normalized_label = normalize_text(label)
+        if normalized_label == normalized:
+            return True
+        ellipsis_candidates = ("…", "...")
+        for token in ellipsis_candidates:
+            if token in label:
+                prefix = normalize_text(label.split(token, 1)[0])
+                if prefix and (normalized.startswith(prefix) or prefix.startswith(normalized)):
+                    return True
+        return False
+
     for button in get_buttons_for_step(step):
-        if normalize_text(button.label) == normalized:
+        if _matches(button.label):
             return button.id
+
+    # Fallback global pour capturer les libellés du menu saisis en texte libre
+    for buttons in BUTTONS_BY_STEP.values():
+        for button in buttons:
+            if _matches(button.label):
+                return button.id
     return None
 
 
