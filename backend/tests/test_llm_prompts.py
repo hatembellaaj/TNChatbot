@@ -79,3 +79,35 @@ def test_build_messages_extracts_relevant_pricing_fact_for_user_question():
 
     developer_prompt = messages[1]["content"]
     assert "Tarif pertinent trouvé: Photo coverage coûte 1000 DT HT." in developer_prompt
+
+
+def test_build_messages_includes_recent_history_without_duplicating_current_user_message():
+    messages = build_messages(
+        step="MAIN_MENU",
+        allowed_buttons=[],
+        form_schema={},
+        config={},
+        rag_context="",
+        rag_empty_factual=False,
+        user_message="Message courant",
+        conversation_history=[
+            {"role": "user", "content": "Bonjour"},
+            {"role": "assistant", "content": "Salut"},
+            {"role": "user", "content": "Message courant"},
+        ],
+    )
+
+    assert [message["role"] for message in messages] == [
+        "system",
+        "developer",
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert messages[-1]["content"] == "Message courant"
+    assert messages[2]["content"] == "Bonjour"
+
+    developer_prompt = messages[1]["content"]
+    assert "Historique récent:" in developer_prompt
+    assert "- Utilisateur: Bonjour" in developer_prompt
+    assert "- Assistant: Salut" in developer_prompt

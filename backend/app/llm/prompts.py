@@ -47,6 +47,9 @@ Contexte RAG:
 {rag_context}
 
 RAG vide et question factuelle: {rag_empty_factual}
+
+Historique récent:
+{recent_history}
 """.strip()
 
 
@@ -152,6 +155,7 @@ def _trim_rag_context(
         priority_facts="",
         rag_context="",
         rag_empty_factual="oui" if rag_empty_factual else "non",
+        recent_history="- Aucun historique récent",
     )
 
     base_tokens = (
@@ -182,6 +186,22 @@ def _trim_rag_context(
         available,
     )
     return trimmed
+
+
+def _format_recent_history(conversation_history: List[Dict[str, str]]) -> str:
+    if not conversation_history:
+        return "- Aucun historique récent"
+
+    lines: List[str] = []
+    for message in conversation_history:
+        role = message.get("role", "")
+        content = message.get("content", "")
+        if role not in {"user", "assistant"} or not content:
+            continue
+        label = "Utilisateur" if role == "user" else "Assistant"
+        lines.append(f"- {label}: {content}")
+
+    return "\n".join(lines) if lines else "- Aucun historique récent"
 
 
 def _trim_developer_prompt(
@@ -217,6 +237,7 @@ def build_messages(
     rag_context: str,
     rag_empty_factual: bool,
     user_message: str,
+    conversation_history: List[Dict[str, str]] | None = None,
 ) -> List[Dict[str, str]]:
     rag_context = _sanitize_rag_context(rag_context)
     priority_facts = _extract_priority_facts(rag_context, user_message)
@@ -238,6 +259,7 @@ def build_messages(
         priority_facts=priority_facts or "- Aucun fait prioritaire extrait",
         rag_context=rag_context,
         rag_empty_factual="oui" if rag_empty_factual else "non",
+        recent_history=_format_recent_history(conversation_history or []),
     )
 
     developer_prompt = _trim_developer_prompt(
@@ -250,8 +272,20 @@ def build_messages(
         bool(rag_context and rag_context in developer_prompt),
     )
 
-    return [
+    messages: List[Dict[str, str]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "developer", "content": developer_prompt},
-        {"role": "user", "content": user_message},
     ]
+
+    history = list(conversation_history or [])
+    if history and history[-1].get("role") == "user" and history[-1].get("content") == user_message:
+        history = history[:-1]
+
+    for message in history:
+        role = message.get("role", "")
+        content = message.get("content", "")
+        if role in {"user", "assistant"} and content:
+            messages.append({"role": role, "content": content})
+
+    messages.append({"role": "user", "content": user_message})
+    return messages
