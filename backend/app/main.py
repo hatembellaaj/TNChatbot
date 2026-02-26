@@ -552,6 +552,27 @@ def record_chat_message(session_id: str, role: str, content: str, step: str | No
         )
 
 
+def fetch_recent_conversation_history(session_id: str, limit: int = 6) -> List[Dict[str, str]]:
+    if limit <= 0:
+        return []
+
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT role, content
+            FROM chat_messages
+            WHERE session_id = %s
+              AND role IN ('user', 'assistant')
+            ORDER BY created_at DESC, id DESC
+            LIMIT %s
+            """,
+            (session_id, limit),
+        ).fetchall()
+
+    history = [{"role": row[0], "content": row[1]} for row in reversed(rows)]
+    return history
+
+
 def update_chat_session_step(session_id: str, step: str) -> None:
     with get_connection() as conn:
         result = conn.execute(
@@ -580,6 +601,7 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
     source = "payload" if raw_intent else ("inferred" if inferred_intent else "none")
     LOGGER.warning("intent_selected intent=%s source=%s", intent or "unknown", source)
     record_chat_message(payload.session_id, "user", payload.user_message, step)
+    conversation_history = fetch_recent_conversation_history(payload.session_id, limit=6)
 
     slots = payload.state.get("slots")
     if not isinstance(slots, dict):
@@ -755,6 +777,7 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
             rag_context=rag_context,
             rag_empty_factual=rag_empty_factual,
             user_message=payload.user_message,
+            conversation_history=conversation_history,
         )
 
         try:
@@ -784,6 +807,7 @@ def chat_message(payload: ChatMessageRequest) -> ChatMessageResponse:
                         rag_context=rag_context,
                         rag_empty_factual=False,
                         user_message=payload.user_message,
+                        conversation_history=conversation_history,
                     )
                     llm_response = call_llm(retry_messages)
                     LOGGER.warning(
@@ -866,6 +890,7 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
     source = "payload" if raw_intent else ("inferred" if inferred_intent else "none")
     LOGGER.warning("intent_selected intent=%s source=%s", intent or "unknown", source)
     record_chat_message(payload.session_id, "user", payload.user_message, step)
+    conversation_history = fetch_recent_conversation_history(payload.session_id, limit=6)
 
     slots = payload.state.get("slots")
     if not isinstance(slots, dict):
@@ -1078,6 +1103,7 @@ async def chat_stream(payload: ChatMessageRequest) -> StreamingResponse:
             rag_context=rag_context,
             rag_empty_factual=rag_empty_factual,
             user_message=payload.user_message,
+            conversation_history=conversation_history,
         )
 
     async def event_stream() -> Any:
