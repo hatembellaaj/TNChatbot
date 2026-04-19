@@ -116,47 +116,6 @@ const wait = (durationMs: number) =>
     window.setTimeout(resolve, durationMs);
   });
 
-const extractImageUrl = (value: unknown): string | null => {
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (/^https?:\/\//i.test(trimmed)) {
-      return trimmed;
-    }
-    return null;
-  }
-
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const nested = extractImageUrl(item);
-      if (nested) {
-        return nested;
-      }
-    }
-    return null;
-  }
-
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    const prioritizedKeys = ["image", "image_url", "imageUrl", "url", "src"];
-    for (const key of prioritizedKeys) {
-      if (key in record) {
-        const nested = extractImageUrl(record[key]);
-        if (nested) {
-          return nested;
-        }
-      }
-    }
-    for (const nestedValue of Object.values(record)) {
-      const nested = extractImageUrl(nestedValue);
-      if (nested) {
-        return nested;
-      }
-    }
-  }
-
-  return null;
-};
-
 export default function Home() {
   const [apiBase, setApiBase] = useState<string | null>(null);
   const apiCandidates = useMemo(() => resolveApiBases(), []);
@@ -186,12 +145,12 @@ export default function Home() {
 
     const fetchAdImage = async () => {
       try {
-        const response = await fetch("https://jsondata.tunisienumerique.com/pub.json");
+        const response = await fetch("/api/public-ad");
         if (!response.ok) {
           return null;
         }
-        const payload = (await response.json()) as unknown;
-        return extractImageUrl(payload);
+        const payload = (await response.json()) as { imageUrl?: string | null };
+        return payload.imageUrl ?? null;
       } catch (error) {
         console.warn("[TNChatbot] Impossible de charger l'image publicitaire.", error);
         return null;
@@ -507,7 +466,11 @@ export default function Home() {
 
     return (
       <main className={styles.introPage}>
-        <section className={styles.introCard}>
+        <section
+          className={`${styles.introCard} ${
+            currentStep.id === 5 ? styles.introCardAd : ""
+          }`}
+        >
           <div className={styles.brandBlock}>
             <div className={styles.brandTag}>TN</div>
             <h1 className={styles.brandTitle}>TUNISIE NUMÉRIQUE</h1>
@@ -525,6 +488,7 @@ export default function Home() {
           ) : null}
 
           <div className={styles.introFooter}>
+            <p className={styles.figureIndex}>Figure {currentStep.id}/5</p>
             <p className={styles.introStatus}>{currentStep.status || "\u00A0"}</p>
             <div className={styles.progressTrack}>
               <div

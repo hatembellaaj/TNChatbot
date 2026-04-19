@@ -30,6 +30,10 @@
   box-shadow: 0 12px 35px rgba(0, 0, 0, 0.2);
 }
 
+.introCardAd {
+  background: #3f4141;
+}
+
 .brandBlock {
   margin-top: 3rem;
   text-align: center;
@@ -86,6 +90,15 @@
 
 .introFooter {
   width: 100%;
+}
+
+.figureIndex {
+  text-align: center;
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  color: #6b6f6f;
+  text-transform: uppercase;
 }
 
 .introStatus {
