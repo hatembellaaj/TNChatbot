@@ -103,6 +103,19 @@ const generateId = () => {
   return `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 };
 
+const INTRO_STEPS = [
+  { id: 1, status: "", progress: 0, durationMs: 800 },
+  { id: 2, status: "Chargement des données...", progress: 20, durationMs: 900 },
+  { id: 3, status: "Préparation du contenu...", progress: 35, durationMs: 900 },
+  { id: 4, status: "Finalisation...", progress: 80, durationMs: 900 },
+  { id: 5, status: "Prêt !", progress: 100, durationMs: 5000 },
+] as const;
+
+const wait = (durationMs: number) =>
+  new Promise<void>((resolve) => {
+    window.setTimeout(resolve, durationMs);
+  });
+
 export default function Home() {
   const [apiBase, setApiBase] = useState<string | null>(null);
   const apiCandidates = useMemo(() => resolveApiBases(), []);
@@ -115,6 +128,9 @@ export default function Home() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedRagMessageId, setExpandedRagMessageId] = useState<string | null>(null);
+  const [introStepIndex, setIntroStepIndex] = useState(0);
+  const [introAdImage, setIntroAdImage] = useState<string | null>(null);
+  const [introComplete, setIntroComplete] = useState(false);
   const initRef = useRef(false);
 
   const shouldShowForm = useMemo(() => {
@@ -125,6 +141,54 @@ export default function Home() {
   }, [chatState.step]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const fetchAdImage = async () => {
+      try {
+        const response = await fetch("/api/public-ad");
+        if (!response.ok) {
+          return null;
+        }
+        const payload = (await response.json()) as { imageUrl?: string | null };
+        return payload.imageUrl ?? null;
+      } catch (error) {
+        console.warn("[TNChatbot] Impossible de charger l'image publicitaire.", error);
+        return null;
+      }
+    };
+
+    const runIntro = async () => {
+      for (let i = 0; i < INTRO_STEPS.length; i += 1) {
+        if (cancelled) {
+          return;
+        }
+        setIntroStepIndex(i);
+        if (INTRO_STEPS[i].id === 5) {
+          const adImage = await fetchAdImage();
+          if (!cancelled) {
+            setIntroAdImage(adImage);
+          }
+        }
+        await wait(INTRO_STEPS[i].durationMs);
+      }
+
+      if (!cancelled) {
+        setIntroComplete(true);
+      }
+    };
+
+    void runIntro();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!introComplete) {
+      return;
+    }
+
     if (initRef.current) {
       return;
     }
@@ -168,6 +232,7 @@ export default function Home() {
           displayUserMessage: false,
           nextStateOverride: { step: "WELCOME" },
           apiBaseOverride: resolvedBase,
+          sessionIdOverride: payload.session_id,
         });
       } catch (err) {
         const message =
@@ -182,7 +247,7 @@ export default function Home() {
     };
 
     void bootstrap();
-  }, []);
+  }, [introComplete, apiCandidates]);
 
   const appendMessage = (message: ChatMessage) => {
     setMessages((prev) => [...prev, message]);
@@ -260,19 +325,18 @@ export default function Home() {
       displayUserMessage?: boolean;
       nextStateOverride?: Partial<ChatState>;
       apiBaseOverride?: string;
+      sessionIdOverride?: string;
     },
   ) => {
-    if (!sessionId || isStreaming || !apiBase) {
+    const resolvedSessionId = options?.sessionIdOverride ?? sessionId;
+    const resolvedApiBase =
+      options?.apiBaseOverride ?? apiBaseRef.current ?? apiBase;
+    if (!resolvedSessionId || isStreaming || !resolvedApiBase) {
       return;
     }
 
     const showUserMessage = options?.displayUserMessage !== false;
     setError(null);
-    const resolvedApiBase =
-      options?.apiBaseOverride ?? apiBaseRef.current ?? apiBase;
-    if (!resolvedApiBase) {
-      return;
-    }
 
     if (showUserMessage) {
       appendMessage({
@@ -299,7 +363,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          session_id: sessionId,
+          session_id: resolvedSessionId,
           user_message: userMessage,
           state: {
             step: options?.nextStateOverride?.step ?? chatState.step,
@@ -396,6 +460,47 @@ export default function Home() {
     setFormState(initialForm);
     await sendMessage(summary, { nextStateOverride: { slots: nextSlots } });
   };
+
+  if (!introComplete) {
+    const currentStep = INTRO_STEPS[introStepIndex];
+
+    return (
+      <main className={styles.introPage}>
+        <section
+          className={`${styles.introCard} ${
+            currentStep.id === 5 ? styles.introCardAd : ""
+          }`}
+        >
+          <div className={styles.brandBlock}>
+            <div className={styles.brandTag}>TN</div>
+            <h1 className={styles.brandTitle}>TUNISIE NUMÉRIQUE</h1>
+            <p className={styles.brandSubtitle}>LA TUNISIE À L&apos;ÈRE DE LA DÉMOCRATIE</p>
+          </div>
+
+          {currentStep.id === 5 ? (
+            <div className={styles.adBlock}>
+              {introAdImage ? (
+                <img src={introAdImage} alt="Publicité Tunisie Numérique" className={styles.adImage} />
+              ) : (
+                <div className={styles.adFallback}>Publicité indisponible</div>
+              )}
+            </div>
+          ) : null}
+
+          <div className={styles.introFooter}>
+            <p className={styles.figureIndex}>Figure {currentStep.id}/5</p>
+            <p className={styles.introStatus}>{currentStep.status || "\u00A0"}</p>
+            <div className={styles.progressTrack}>
+              <div
+                className={styles.progressBar}
+                style={{ width: `${currentStep.progress}%` }}
+              />
+            </div>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className={styles.page}>
