@@ -8,6 +8,105 @@
   padding: 2.5rem 1.5rem;
 }
 
+.introPage {
+  min-height: 100vh;
+  background: #e7eceb;
+  color: #3f3f3f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.introCard {
+  width: min(540px, 100%);
+  min-height: 90vh;
+  background: #ecf1ef;
+  border-radius: 18px;
+  padding: 2rem 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.2);
+}
+
+.brandBlock {
+  margin-top: 3rem;
+  text-align: center;
+}
+
+.brandTag {
+  display: inline-flex;
+  padding: 0.4rem 0.75rem;
+  border-radius: 0.35rem;
+  background: #7ab62f;
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.brandTitle {
+  margin: 1rem 0 0.35rem;
+  font-size: 2rem;
+  line-height: 1.1;
+  letter-spacing: 0.03em;
+  color: #7ab62f;
+}
+
+.brandSubtitle {
+  margin: 0;
+  color: #7ba66d;
+  letter-spacing: 0.08em;
+  font-size: 0.85rem;
+}
+
+.adBlock {
+  margin: 1rem auto;
+  width: 100%;
+  max-width: 500px;
+  min-height: 280px;
+  background: rgba(0, 0, 0, 0.18);
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.adImage {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #2f2f2f;
+}
+
+.adFallback {
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.introFooter {
+  width: 100%;
+}
+
+.introStatus {
+  text-align: center;
+  margin: 0 0 0.85rem;
+  font-size: 2rem;
+  color: #414141;
+}
+
+.progressTrack {
+  width: 100%;
+  height: 4px;
+  background: #cfd6d4;
+}
+
+.progressBar {
+  height: 100%;
+  background: #7ab62f;
+  transition: width 0.3s ease;
+}
+
 .chatShell {
   width: min(1080px, 100%);
   display: grid;
@@ -221,6 +320,22 @@
 
   .bubble {
     max-width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .introCard {
+    min-height: 95vh;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .brandTitle {
+    font-size: 1.65rem;
+  }
+
+  .introStatus {
+    font-size: 2.15rem;
   }
 }
 
