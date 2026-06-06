@@ -2,9 +2,10 @@ import json
 import logging
 import os
 import re
+import unicodedata
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -54,6 +55,30 @@ INTENTS_TRIGGERING_RAG = {
     "innovation",
 }
 
+# Étapes conversationnelles qui ne déclenchent jamais le RAG
+STEPS_NO_RAG = {
+    "FORM_STANDARD_FIRST_NAME",
+    "FORM_STANDARD_LAST_NAME",
+    "FORM_STANDARD_COMPANY",
+    "FORM_STANDARD_EMAIL",
+    "FORM_STANDARD_PHONE",
+    "FORM_STANDARD_JOB_TITLE",
+    "FORM_STANDARD_SECTOR",
+    "FORM_STANDARD_MESSAGE",
+    "FORM_STANDARD_DONE",
+    "FORM_IMMONEUF_PROJECT_CITIES",
+    "FORM_IMMONEUF_PROJECT_TYPES",
+    "FORM_IMMONEUF_PROJECTS_COUNT",
+    "FORM_IMMONEUF_MARKETING_PERIOD",
+    "FORM_PREMIUM_ESTIMATED_USERS",
+    "FORM_PARTNERSHIP_PRIORITY",
+    "BUDGET_CLIENT_TYPE",
+    "BUDGET_OBJECTIVE",
+    "BUDGET_RANGE",
+    "WELCOME_SCOPE",
+    "OUT_OF_SCOPE_READER",
+}
+
 KEYWORD_FALLBACKS = {
     "audience",
     "offre",
@@ -66,19 +91,64 @@ KEYWORD_FALLBACKS = {
     "innovation",
 }
 
-INTENT_KEYWORDS = [
-    ("welcome_scope", {"bonjour", "bonsoir", "salut", "hello", "hey", "coucou"}),
-    ("audience", {"audience", "lecteurs", "lectorat"}),
-    ("solutions", {"offre", "offres", "produit", "produits", "solution", "solutions"}),
-    ("display", {"display", "banniere", "bannières", "banner", "banners"}),
-    ("content", {"contenu", "contenus", "sponsorisé", "sponsorise", "article"}),
-    ("video", {"format video", "vidéo", "video"}),
-    ("newsletter_audio", {"newsletter", "audio", "emailing"}),
-    ("innovation", {"innovation", "innovant", "innovante", "operation speciale"}),
-    ("mag", {"mag", "magazine"}),
-    ("formats", {"format", "formats"}),
-    ("immoneuf", {"immoneuf", "immobilier neuf", "neuf"}),
-    ("premium", {"premium"}),
+# --- Classifieur d'intention hybride ---
+# Chaque entrée : (intent, keywords_normalisés, patterns_regex, poids_spécificité)
+# Les keywords sont déjà en minuscules sans accents (normalisés)
+INTENT_RULES: List[Tuple[str, List[str], List[str], float]] = [
+    ("welcome_scope", [
+        "bonjour", "bonsoir", "salut", "hello", "hey", "coucou",
+        "hi", "good morning", "good evening",
+    ], [], 0.5),
+    ("audience", [
+        "audience", "lecteurs", "lectorat", "visiteurs", "trafic", "traffic",
+        "pageviews", "pages vues", "utilisateurs", "users", "profil", "profils",
+        "demographique", "demographiques", "cible", "ciblage",
+        "millions", "mensuel", "mensuels",
+    ], [r"combien.*lecteur", r"qui.*visite", r"visiteur.*unique"], 0.9),
+    ("solutions", [
+        "offre", "offres", "produit", "produits", "solution", "solutions",
+        "catalogue", "pack", "packs", "formule", "formules",
+        "publicite", "pub", "advertising",
+    ], [r"qu.*offre", r"list.*solution", r"que.*proposez"], 0.8),
+    ("display", [
+        "display", "banniere", "bannieres", "banner", "banners",
+        "leaderboard", "mpu", "billboard", "interstitiel", "interstitielle",
+        "encart", "encarts", "visuel", "visuels",
+    ], [r"banniere.*pub", r"format.*display"], 1.0),
+    ("content", [
+        "contenu", "contenus", "sponsorise", "sponsorises", "sponsorisee", "sponsorisees",
+        "article", "articles", "natif", "native", "branded",
+        "publi", "publi-redactionnel", "publi redactionnel",
+    ], [r"article.*sponsorise", r"contenu.*marque"], 1.0),
+    ("video", [
+        "video", "videos", "preroll", "pre-roll", "instream", "outstream",
+        "live", "youtube", "facebook", "stream", "clip",
+    ], [r"format.*video", r"pub.*video", r"publicite.*video"], 1.0),
+    ("newsletter_audio", [
+        "newsletter", "audio", "emailing", "email", "mailing", "podcast",
+        "radio", "sonore", "email marketing",
+    ], [r"pub.*newsletter", r"campagne.*email"], 1.0),
+    ("innovation", [
+        "innovation", "innovant", "innovante", "innovants", "innovantes",
+        "operation speciale", "operations speciales", "op speciale",
+        "habillage", "interactif", "interactive", "gamification",
+        "quiz", "jeu", "concours", "evenement", "event",
+    ], [], 0.9),
+    ("mag", [
+        "mag", "magazine", "feminin", "lifestyle",
+    ], [], 0.9),
+    ("formats", [
+        "format", "formats", "taille", "tailles", "dimension", "dimensions",
+        "specification", "specifications", "specs",
+    ], [], 0.7),
+    ("immoneuf", [
+        "immoneuf", "immobilier neuf", "neuf", "promoteur", "promoteurs",
+        "programme immobilier", "residence", "residences", "appartement neuf",
+    ], [r"immobilier.*neuf", r"programme.*immobilier"], 1.0),
+    ("premium", [
+        "premium", "exclusif", "exclusifs", "haut de gamme", "vip",
+        "cible premium", "segment premium",
+    ], [], 0.9),
 ]
 
 FACTUAL_TOKENS = {
@@ -108,6 +178,45 @@ DEFAULT_ADMIN_CONFIG = {
     "email_config": {},
     "sectors": [],
 }
+
+
+def _normalize_text(text: str) -> str:
+    """Normalise : minuscules + suppression accents + ponctuation → espace."""
+    nfd = unicodedata.normalize("NFD", text.lower())
+    without_accents = "".join(c for c in nfd if unicodedata.category(c) != "Mn")
+    return re.sub(r"[^\w\s]", " ", without_accents)
+
+
+def classify_intent(user_message: str) -> Optional[str]:
+    """
+    Classifieur hybride d'intention.
+
+    Stratégie :
+    1. Normaliser le message (accents, casse, ponctuation).
+    2. Pour chaque intent, calculer score = (nb_keyword_hits + 2×nb_regex_hits) × weight.
+    3. Retourner l'intent avec le meilleur score > 0.
+    4. En cas d'égalité, l'intent le plus spécifique (weight élevé) gagne.
+    """
+    normalized = _normalize_text(user_message)
+
+    best_intent: Optional[str] = None
+    best_score: float = 0.0
+
+    for intent, keywords, patterns, weight in INTENT_RULES:
+        keyword_hits = sum(1 for kw in keywords if kw in normalized)
+        regex_hits = sum(1 for pat in patterns if re.search(pat, normalized))
+        score = (keyword_hits + regex_hits * 2) * weight
+
+        if score > best_score:
+            best_score = score
+            best_intent = intent
+
+    if best_intent:
+        LOGGER.info("intent_classifier_hit intent=%s score=%.2f", best_intent, best_score)
+        return best_intent
+
+    LOGGER.info("intent_classifier_miss")
+    return None
 
 
 def request_json(method: str, url: str, payload: dict | None = None) -> dict:
@@ -160,19 +269,56 @@ def get_connection() -> psycopg.Connection:
 
 
 def chunk_text(text: str, max_tokens: int, overlap: int) -> List[str]:
-    words = [word for word in text.split() if word.strip()]
-    if not words:
+    """
+    Découpage sémantique par paragraphes.
+
+    Stratégie :
+    1. Découper par frontières naturelles (double newline = séparateur de paragraphe).
+    2. Agréger les paragraphes jusqu'à max_tokens mots.
+    3. Si un paragraphe seul dépasse max_tokens, le découper par mots avec overlap.
+    4. Appliquer l'overlap en reprenant les derniers `overlap` mots du chunk précédent.
+    """
+    raw_paragraphs = re.split(r"\n\s*\n", text)
+    paragraphs = [p.strip() for p in raw_paragraphs if p.strip()]
+
+    if not paragraphs:
         return []
+
     chunks: List[str] = []
-    start = 0
-    while start < len(words):
-        end = min(start + max_tokens, len(words))
-        chunk_words = words[start:end]
-        chunks.append(" ".join(chunk_words))
-        if end == len(words):
-            break
-        start = max(0, end - overlap)
-    return chunks
+    current_words: List[str] = []
+
+    def _flush(words: List[str]) -> None:
+        if words:
+            chunks.append(" ".join(words))
+
+    def _split_long_paragraph(words: List[str]) -> None:
+        start = 0
+        while start < len(words):
+            end = min(start + max_tokens, len(words))
+            chunks.append(" ".join(words[start:end]))
+            if end == len(words):
+                break
+            start = max(0, end - overlap)
+
+    for para in paragraphs:
+        para_words = para.split()
+        if not para_words:
+            continue
+
+        if len(para_words) > max_tokens:
+            _flush(current_words)
+            current_words = []
+            _split_long_paragraph(para_words)
+            continue
+
+        if current_words and len(current_words) + len(para_words) > max_tokens:
+            _flush(current_words)
+            current_words = (current_words[-overlap:] if overlap > 0 else []) + para_words
+        else:
+            current_words.extend(para_words)
+
+    _flush(current_words)
+    return [c for c in chunks if c.strip()]
 
 
 def search_qdrant(
@@ -240,7 +386,6 @@ def build_rag_context(chunks: Iterable[RetrievedChunk]) -> str:
 
 
 def _compact_chunk_content(content: str, *, max_chars: int = 700, max_text_items: int = 12) -> str:
-    """Réduit les fragments JSON volumineux pour garder les faits lisibles dans le prompt."""
     compact = content.strip()
     if not compact:
         return ""
@@ -264,7 +409,6 @@ def _compact_chunk_content(content: str, *, max_chars: int = 700, max_text_items
 
 
 def _focus_chunk_content_for_query(query: str, content: str, *, max_lines: int = 4) -> str:
-    """Conserve en priorité les lignes pertinentes pour la requête (ex: tarifs demandés)."""
     compact = content.strip()
     if not compact:
         return ""
@@ -309,8 +453,34 @@ def _focus_chunk_content_for_query(query: str, content: str, *, max_lines: int =
     return " | ".join(selected)
 
 
-def should_trigger_rag(intent: Optional[str], user_message: str) -> bool:
-    return True
+def should_trigger_rag(
+    intent: Optional[str],
+    user_message: str,
+    step: Optional[str] = None,
+) -> bool:
+    """
+    Décide si le pipeline RAG doit être activé.
+
+    Règles (dans l'ordre) :
+    1. Jamais sur les étapes wizard/formulaire (step dans STEPS_NO_RAG).
+    2. Toujours si l'intent est dans INTENTS_TRIGGERING_RAG.
+    3. Toujours si le message ressemble à une question factuelle.
+    4. Sinon : pas de RAG (évite des appels embedding inutiles sur navigations menu).
+    """
+    if step and step.upper() in STEPS_NO_RAG:
+        LOGGER.info("rag_skip step=%s", step)
+        return False
+
+    if intent and intent in INTENTS_TRIGGERING_RAG:
+        LOGGER.info("rag_trigger intent=%s", intent)
+        return True
+
+    if is_factual_question(user_message):
+        LOGGER.info("rag_trigger factual_question")
+        return True
+
+    LOGGER.info("rag_skip no_intent_no_question intent=%s", intent or "none")
+    return False
 
 
 def _tokenize_lexical(text: str) -> List[str]:
@@ -569,18 +739,6 @@ def load_intent_chunks(intent: str) -> List[RetrievedChunk]:
     return []
 
 
-def classify_intent(user_message: str) -> str | None:
-    lowered = user_message.lower()
-    for intent, keywords in INTENT_KEYWORDS:
-        if any(keyword in lowered for keyword in keywords):
-            LOGGER.info("intent_classifier_hit intent=%s", intent)
-            return intent
-    LOGGER.info("intent_classifier_miss")
-    return None
-
-
-
-
 def retrieve_debug(query: str, k: int = 10, intent: str | None = None) -> List[RetrievedChunk]:
     rewritten_query = rewrite_query(query)
     vector = embed_query(rewritten_query)
@@ -589,6 +747,8 @@ def retrieve_debug(query: str, k: int = 10, intent: str | None = None) -> List[R
     keyword_results = keyword_search_bm25(rewritten_query, k, normalized_intent)
     merged = reciprocal_rank_fusion(vector_results, keyword_results, k)
     return rerank_chunks_cross_encoder(rewritten_query, merged)[:k]
+
+
 def retrieve_rag_context(
     query: str,
     top_k: int | None = None,
@@ -644,97 +804,27 @@ def retrieve_rag_context(
     if not chunks:
         fallback_threshold = INTENT_SCORE_THRESHOLD_FALLBACKS.get(normalized_intent or "")
         if fallback_threshold is not None and fallback_threshold != score_threshold:
-            LOGGER.warning(
-                "rag_search_threshold_fallback intent=%s score_threshold=%s",
-                normalized_intent or "none",
-                fallback_threshold,
-            )
-            chunks = search_qdrant(
-                vector,
-                retrieval_limit,
-                fallback_threshold,
-                normalized_intent,
-            )
-            LOGGER.warning(
-                "rag_search_threshold_results count=%s doc_ids=%s",
-                len(chunks),
-                [chunk.point_id for chunk in chunks],
-            )
+            chunks = search_qdrant(vector, retrieval_limit, fallback_threshold, normalized_intent)
         if not chunks:
-            LOGGER.warning(
-                "rag_search_empty_retry intent=%s score_threshold=None",
-                normalized_intent or "none",
-            )
             chunks = search_qdrant(vector, retrieval_limit, None, normalized_intent)
-            LOGGER.warning(
-                "rag_search_retry_results count=%s doc_ids=%s",
-                len(chunks),
-                [chunk.point_id for chunk in chunks],
-            )
     if normalized_intent:
         filtered_chunks = [
-            chunk
-            for chunk in chunks
-            if source_matches_intent(chunk.payload, normalized_intent)
+            chunk for chunk in chunks if source_matches_intent(chunk.payload, normalized_intent)
         ]
-        LOGGER.warning(
-            "rag_search_results_filtered count=%s intent=%s",
-            len(filtered_chunks),
-            normalized_intent,
-        )
         if not filtered_chunks and semantic_chunks:
-            LOGGER.warning(
-                "rag_intent_filter_empty_keep_semantic count=%s intent=%s",
-                len(semantic_chunks),
-                normalized_intent,
-            )
             chunks = semantic_chunks
         elif not filtered_chunks:
-            LOGGER.warning("rag_intent_empty_fallback intent=%s", normalized_intent)
-            LOGGER.warning("rag_intent_source_fallback intent=%s", normalized_intent)
             chunks = search_qdrant(vector, retrieval_limit, score_threshold)
-            LOGGER.warning(
-                "rag_search_fallback_results count=%s doc_ids=%s",
-                len(chunks),
-                [chunk.point_id for chunk in chunks],
-            )
             if not chunks:
-                LOGGER.warning(
-                    "rag_search_fallback_empty_retry intent=%s score_threshold=None",
-                    normalized_intent,
-                )
                 chunks = search_qdrant(vector, retrieval_limit, None)
-                LOGGER.warning(
-                    "rag_search_fallback_retry_results count=%s doc_ids=%s",
-                    len(chunks),
-                    [chunk.point_id for chunk in chunks],
-                )
             filtered_chunks = [
-                chunk
-                for chunk in chunks
-                if source_matches_intent(chunk.payload, normalized_intent)
+                chunk for chunk in chunks if source_matches_intent(chunk.payload, normalized_intent)
             ]
-            LOGGER.warning(
-                "rag_search_fallback_filtered count=%s intent=%s",
-                len(filtered_chunks),
-                normalized_intent,
-            )
             if not filtered_chunks:
-                LOGGER.warning("rag_intent_file_fallback intent=%s", normalized_intent)
                 filtered_chunks = load_intent_chunks(normalized_intent)[:resolved_top_k]
-                LOGGER.warning(
-                    "rag_intent_file_fallback_results count=%s intent=%s",
-                    len(filtered_chunks),
-                    normalized_intent,
-                )
         if filtered_chunks:
             chunks = filtered_chunks
     reranked_chunks = rerank_chunks_cross_encoder(rewritten_query, chunks)
-    LOGGER.warning(
-        "rag_rerank_applied total=%s selected=%s",
-        len(reranked_chunks),
-        min(resolved_top_k, len(reranked_chunks)),
-    )
     best_chunks = reranked_chunks[:resolved_top_k]
     if best_chunks:
         focused_chunks = [
@@ -751,7 +841,6 @@ def retrieve_rag_context(
                 chunk.score,
                 chunk.payload.get("source_uri", "unknown"),
             )
-            LOGGER.warning("rag_context_sent_to_llm index=%s content=%s", index, chunk.content)
         best_chunks = focused_chunks
     else:
         LOGGER.warning("rag_no_chunk_selected")

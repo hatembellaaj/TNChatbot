@@ -76,19 +76,56 @@ class Chunk:
 
 
 def chunk_text(text: str, max_tokens: int, overlap: int) -> List[str]:
-    words = [word for word in text.split() if word.strip()]
-    if not words:
+    """
+    Découpage sémantique par paragraphes.
+
+    Stratégie :
+    1. Découper par frontières naturelles (double newline = séparateur de paragraphe).
+    2. Agréger les paragraphes jusqu'à max_tokens mots.
+    3. Si un paragraphe seul dépasse max_tokens, le découper par mots avec overlap.
+    4. Appliquer l'overlap en reprenant les derniers `overlap` mots du chunk précédent.
+    """
+    raw_paragraphs = re.split(r"\n\s*\n", text)
+    paragraphs = [p.strip() for p in raw_paragraphs if p.strip()]
+
+    if not paragraphs:
         return []
+
     chunks: List[str] = []
-    start = 0
-    while start < len(words):
-        end = min(start + max_tokens, len(words))
-        chunk_words = words[start:end]
-        chunks.append(" ".join(chunk_words))
-        if end == len(words):
-            break
-        start = max(0, end - overlap)
-    return chunks
+    current_words: List[str] = []
+
+    def _flush(words: List[str]) -> None:
+        if words:
+            chunks.append(" ".join(words))
+
+    def _split_long_paragraph(words: List[str]) -> None:
+        start = 0
+        while start < len(words):
+            end = min(start + max_tokens, len(words))
+            chunks.append(" ".join(words[start:end]))
+            if end == len(words):
+                break
+            start = max(0, end - overlap)
+
+    for para in paragraphs:
+        para_words = para.split()
+        if not para_words:
+            continue
+
+        if len(para_words) > max_tokens:
+            _flush(current_words)
+            current_words = []
+            _split_long_paragraph(para_words)
+            continue
+
+        if current_words and len(current_words) + len(para_words) > max_tokens:
+            _flush(current_words)
+            current_words = (current_words[-overlap:] if overlap > 0 else []) + para_words
+        else:
+            current_words.extend(para_words)
+
+    _flush(current_words)
+    return [c for c in chunks if c.strip()]
 
 
 def estimate_tokens(text: str) -> int:
@@ -141,19 +178,12 @@ def embed_texts(texts: Sequence[str]) -> List[List[float]]:
         )
         for attempt in range(1, attempts + 1):
             request_started_at = time.perf_counter()
-            LOGGER.info("Embedding attempt %s/%s started (batch=%s/%s)", attempt, attempts, batch_index, total_batches)
             try:
                 response = request_json("POST", embedding_url, payload, timeout_seconds=timeout_seconds)
                 elapsed = time.perf_counter() - request_started_at
-                data_count = len(response.get("data", [])) if isinstance(response, dict) else 0
                 LOGGER.info(
-                    "Embedding attempt %s/%s succeeded in %.2fs (batch=%s/%s, items=%s)",
-                    attempt,
-                    attempts,
-                    elapsed,
-                    batch_index,
-                    total_batches,
-                    data_count,
+                    "Embedding attempt %s/%s succeeded in %.2fs (batch=%s/%s)",
+                    attempt, attempts, elapsed, batch_index, total_batches,
                 )
                 break
             except HTTPError as exc:
@@ -165,15 +195,8 @@ def embed_texts(texts: Sequence[str]) -> List[List[float]]:
                     + (f" body={error_body[:300]!r}" if error_body else "")
                 )
                 LOGGER.error(
-                    "Embedding attempt %s/%s failed with HTTP %s in %.2fs (batch=%s/%s retryable=%s): %s",
-                    attempt,
-                    attempts,
-                    exc.code,
-                    elapsed,
-                    batch_index,
-                    total_batches,
-                    retryable,
-                    error_body[:300] if error_body else exc,
+                    "Embedding attempt %s/%s failed with HTTP %s in %.2fs (retryable=%s)",
+                    attempt, attempts, exc.code, elapsed, retryable,
                 )
                 if not retryable or attempt == attempts:
                     detail = (
@@ -183,8 +206,6 @@ def embed_texts(texts: Sequence[str]) -> List[List[float]]:
                     )
                     if error_body:
                         detail = f"{detail}: {error_body}"
-                    if attempts > 1:
-                        detail = f"{detail} after {attempt} attempt(s)"
                     if error_history:
                         detail = f"{detail}. Attempts: {' | '.join(error_history)}"
                     raise RuntimeError(detail) from exc
@@ -195,22 +216,14 @@ def embed_texts(texts: Sequence[str]) -> List[List[float]]:
                     f"attempt {attempt}/{attempts}: {type(exc).__name__} in {elapsed:.2f}s: {exc}"
                 )
                 LOGGER.error(
-                    "Embedding attempt %s/%s failed with %s in %.2fs (batch=%s/%s): %s",
-                    attempt,
-                    attempts,
-                    type(exc).__name__,
-                    elapsed,
-                    batch_index,
-                    total_batches,
-                    exc,
+                    "Embedding attempt %s/%s failed with %s in %.2fs: %s",
+                    attempt, attempts, type(exc).__name__, elapsed, exc,
                 )
                 if attempt == attempts:
                     detail = (
                         f"Embedding request failed for model '{embedding_model}' via '{embedding_url}': {exc}"
                         f" on batch {batch_index}/{total_batches}"
                     )
-                    if attempts > 1:
-                        detail = f"{detail} after {attempt} attempt(s)"
                     if error_history:
                         detail = f"{detail}. Attempts: {' | '.join(error_history)}"
                     raise RuntimeError(detail) from exc
@@ -218,13 +231,8 @@ def embed_texts(texts: Sequence[str]) -> List[List[float]]:
 
             wait_seconds = min(0.5 * attempt, 2.0)
             LOGGER.warning(
-                "Embedding request attempt %s/%s failed on batch %s/%s: %s; retrying in %.1fs",
-                attempt,
-                attempts,
-                batch_index,
-                total_batches,
-                last_error,
-                wait_seconds,
+                "Embedding attempt %s/%s failed on batch %s/%s, retrying in %.1fs",
+                attempt, attempts, batch_index, total_batches, wait_seconds,
             )
             time.sleep(wait_seconds)
 
@@ -242,7 +250,7 @@ def embed_texts(texts: Sequence[str]) -> List[List[float]]:
         raise RuntimeError("Embedding response size mismatch")
 
     LOGGER.info(
-        "Embedding completed successfully: vectors=%s dimension=%s",
+        "Embedding completed: vectors=%s dimension=%s",
         len(embeddings),
         len(embeddings[0]) if embeddings else 0,
     )
@@ -299,7 +307,28 @@ def delete_qdrant_points(point_ids: Sequence[str]) -> None:
     request_json("POST", url, {"points": list(point_ids)})
 
 
-def ingest_sources(source_dir: Path | str | None = None) -> dict:
+def _delete_document_chunks(conn: psycopg.Connection, doc_id: uuid.UUID) -> List[str]:
+    """Supprime les chunks DB d'un document et retourne leurs IDs pour nettoyage Qdrant."""
+    rows = conn.execute(
+        "SELECT id FROM kb_chunks WHERE document_id = %s",
+        (doc_id,),
+    ).fetchall()
+    chunk_ids = [str(row[0]) for row in rows]
+    if chunk_ids:
+        conn.execute("DELETE FROM kb_chunks WHERE document_id = %s", (doc_id,))
+    return chunk_ids
+
+
+def ingest_sources(source_dir: Path | str | None = None, force: bool = False) -> dict:
+    """
+    Pipeline d'ingestion de la base documentaire.
+
+    Args:
+        source_dir: Dossier contenant les fichiers source. Défaut : kb_sources.
+        force:  Si True, réingère même les fichiers déjà indexés (supprime l'ancienne
+                version DB + Qdrant avant réingestion). Si False (défaut), les fichiers
+                déjà présents avec status='ready' sont ignorés (idempotent).
+    """
     chunk_size = int(os.getenv("RAG_CHUNK_SIZE", "200"))
     overlap = int(os.getenv("RAG_CHUNK_OVERLAP", "40"))
     source_root = Path(source_dir or "kb_sources").resolve()
@@ -313,26 +342,68 @@ def ingest_sources(source_dir: Path | str | None = None) -> dict:
             "documents": 0,
             "chunks": 0,
             "skipped": 0,
+            "updated": 0,
         }
 
         for path in iter_source_files(source_root):
             lower_name = path.name.lower()
             if any(token in lower_name for token in {"training", "synthetic", "generated", "prompt"}):
-                LOGGER.info("Skipping non-source file: %s", path.name)
+                LOGGER.info("ingest_skip_non_source file=%s", path.name)
                 stats["skipped"] += 1
                 continue
+
             text = path.read_text(encoding="utf-8")
             if not text.strip():
                 stats["skipped"] += 1
                 continue
 
+            source_uri = str(path.relative_to(source_root))
+
+            # --- Idempotence : vérifier si déjà ingéré ---
+            existing = conn.execute(
+                """
+                SELECT id FROM kb_documents
+                WHERE source_uri = %s AND status = 'ready'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (source_uri,),
+            ).fetchone()
+
+            if existing and not force:
+                LOGGER.info("ingest_skip_already_ready source_uri=%s", source_uri)
+                stats["skipped"] += 1
+                continue
+
+            if existing and force:
+                # Supprimer l'ancienne version : chunks DB + Qdrant + document
+                old_doc_id = existing[0]
+                old_chunk_ids = _delete_document_chunks(conn, old_doc_id)
+                try:
+                    delete_qdrant_points(old_chunk_ids)
+                except Exception:
+                    LOGGER.warning(
+                        "ingest_qdrant_delete_failed doc_id=%s chunk_count=%s",
+                        old_doc_id,
+                        len(old_chunk_ids),
+                        exc_info=True,
+                    )
+                conn.execute("DELETE FROM kb_documents WHERE id = %s", (old_doc_id,))
+                LOGGER.info(
+                    "ingest_force_replaced source_uri=%s old_chunks=%s",
+                    source_uri,
+                    len(old_chunk_ids),
+                )
+                stats["updated"] += 1
+
+            # --- Création du document ---
             doc_id = conn.execute(
                 """
                 INSERT INTO kb_documents (ingestion_run_id, source_type, source_uri, title, status)
                 VALUES (%s, %s, %s, %s, %s)
                 RETURNING id
                 """,
-                (run_id, "file", str(path.relative_to(source_root)), path.stem, "processing"),
+                (run_id, "file", source_uri, path.stem, "processing"),
             ).fetchone()[0]
 
             chunks = chunk_text(text, chunk_size, overlap)
@@ -377,7 +448,7 @@ def ingest_sources(source_dir: Path | str | None = None) -> dict:
                             "intent": metadata["intent"],
                             "section": metadata["section"],
                             "entity": metadata["entity"],
-                            "source_uri": str(path.relative_to(source_root)),
+                            "source_uri": source_uri,
                             "title": path.stem,
                         },
                     }
@@ -391,6 +462,11 @@ def ingest_sources(source_dir: Path | str | None = None) -> dict:
 
             stats["documents"] += 1
             stats["chunks"] += len(chunks)
+            LOGGER.info(
+                "ingest_document_done source_uri=%s chunks=%s",
+                source_uri,
+                len(chunks),
+            )
 
         conn.execute(
             """
@@ -401,7 +477,7 @@ def ingest_sources(source_dir: Path | str | None = None) -> dict:
             ("finished", json.dumps(stats), run_id),
         )
 
-    LOGGER.info("kb ingestion finished", extra={"stats": stats})
+    LOGGER.info("kb ingestion finished stats=%s", stats)
     return stats
 
 
