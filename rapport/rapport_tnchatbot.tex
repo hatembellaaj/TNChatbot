@@ -1,0 +1,1419 @@
+%============================================================
+%  TNChatbot — Rapport de Projet de Fin d'Année
+%  Institut International de Technologie à Sfax (IIT)
+%  Template fidèle au modèle PFA-5.pdf
+%============================================================
+\documentclass[12pt,a4paper]{report}
+
+%------------------------------------------------------------
+% Packages
+%------------------------------------------------------------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{tocloft}
+\usepackage[hidelinks]{hyperref}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{float}
+\usepackage{setspace}
+\usepackage{microtype}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{enumitem}
+\usepackage{tikz}
+\usepackage{amsmath}
+\usepackage{mdframed}
+\usepackage{minitoc}
+\usepackage{lettrine}
+\usepackage{lmodern}
+\usepackage{textcomp}
+\usepackage{multirow}
+\usepackage{colortbl}
+
+%------------------------------------------------------------
+% Geometry
+%------------------------------------------------------------
+\geometry{
+  a4paper,
+  top=2.5cm, bottom=2.5cm,
+  left=3cm,  right=2.5cm,
+  headheight=15pt
+}
+
+%------------------------------------------------------------
+% Line spacing
+%------------------------------------------------------------
+\setstretch{1.15}
+
+%------------------------------------------------------------
+% Colors
+%------------------------------------------------------------
+\definecolor{chapterbg}{RGB}{0,0,0}
+\definecolor{codeframe}{RGB}{200,200,200}
+\definecolor{codebg}{RGB}{248,248,248}
+\definecolor{keyword}{RGB}{0,0,180}
+\definecolor{comment}{RGB}{100,100,100}
+\definecolor{string}{RGB}{180,0,0}
+\definecolor{tableheader}{RGB}{230,230,230}
+
+%------------------------------------------------------------
+% Chapter style — boîte noire + numéro + ligne horizontale
+% Fidèle au template IIT
+%------------------------------------------------------------
+\titleformat{\chapter}[display]
+  {\normalfont}
+  {%
+    \begin{tikzpicture}[baseline=(num.base)]
+      \node[fill=black, minimum width=1.4cm, minimum height=1.4cm,
+            text=white, font=\Huge\bfseries, inner sep=0pt,
+            anchor=south west] (num) at (0,0) {\thechapter};
+      \node[font=\small\scshape, anchor=south west, text=black]
+            at (-0.05cm,1.45cm) {Chapitre};
+      \draw[line width=0.8pt] (1.55cm,0.7cm) -- (\textwidth,0.7cm);
+    \end{tikzpicture}%
+  }
+  {0pt}
+  {\vspace{6pt}\Large\bfseries}
+  [\vspace{4pt}]
+
+\titleformat{name=\chapter,numberless}[display]
+  {\normalfont\Large\bfseries\centering}
+  {}
+  {0pt}
+  {}
+
+\titlespacing*{\chapter}{0pt}{-10pt}{20pt}
+
+%------------------------------------------------------------
+% Section / subsection style
+%------------------------------------------------------------
+\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{1em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries}{\thesubsubsection}{1em}{}
+
+%------------------------------------------------------------
+% Headers / footers
+%------------------------------------------------------------
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\fancyhead[L]{\small\scshape\leftmark}
+\fancyhead[R]{\small\thepage}
+\fancyfoot{}
+\renewcommand{\chaptermark}[1]{\markboth{\chaptername\ \thechapter.\ #1}{}}
+
+\fancypagestyle{plain}{
+  \fancyhf{}
+  \fancyfoot[C]{\small\thepage}
+  \renewcommand{\headrulewidth}{0pt}
+}
+
+%------------------------------------------------------------
+% Caption style (italic, small, "–" separator)
+%------------------------------------------------------------
+\captionsetup{
+  labelfont=sc,
+  textfont=it,
+  labelsep=endash,
+  font=small
+}
+
+%------------------------------------------------------------
+% List style (em-dash bullets like in template)
+%------------------------------------------------------------
+\setlist[itemize]{label=\textemdash, leftmargin=2em, itemsep=2pt}
+\setlist[enumerate]{leftmargin=2em, itemsep=2pt}
+
+%------------------------------------------------------------
+% Code listing style
+%------------------------------------------------------------
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\color{keyword}\bfseries,
+  commentstyle=\color{comment}\itshape,
+  stringstyle=\color{string},
+  backgroundcolor=\color{codebg},
+  frame=single,
+  frameround=tttt,
+  rulecolor=\color{codeframe},
+  breaklines=true,
+  breakatwhitespace=true,
+  showstringspaces=false,
+  tabsize=4,
+  captionpos=b,
+  numbers=left,
+  numberstyle=\tiny\color{comment},
+  numbersep=8pt,
+  xleftmargin=12pt
+}
+
+%------------------------------------------------------------
+% minitoc (Plan en début de chapitre)
+%------------------------------------------------------------
+\mtcsettitle{minitoc}{Plan}
+\mtcsetdepth{minitoc}{2}
+\setcounter{minitocdepth}{2}
+
+%------------------------------------------------------------
+% TOC / LOF / LOT styling (dots like template)
+%------------------------------------------------------------
+\renewcommand{\cftchapfont}{\bfseries}
+\renewcommand{\cftsecfont}{}
+\renewcommand{\cftsubsecfont}{}
+\renewcommand{\cftdotsep}{1}
+
+%------------------------------------------------------------
+% Metadata
+%------------------------------------------------------------
+\hypersetup{
+  pdftitle={TNChatbot — Rapport PFA},
+  pdfauthor={Beya Abid},
+  pdfsubject={Chatbot intelligent — Tunisie Numérique}
+}
+
+%============================================================
+\begin{document}
+\dominitoc
+%============================================================
+
+%------------------------------------------------------------
+% PAGE DE TITRE
+%------------------------------------------------------------
+\begin{titlepage}
+  \begin{center}
+    % En-tête
+    \noindent
+    \begin{minipage}[t]{0.30\textwidth}
+      \raggedright
+      \footnotesize
+      \textbf{Ministère de l'Enseignement Supérieur et de\\
+      la Recherche Scientifique}\\[4pt]
+      \textbf{Institut International de Technologie à Sfax}
+    \end{minipage}
+    \hfill
+    \begin{minipage}[t]{0.25\textwidth}
+      \centering
+      % Logo IIT (remplacer par le vrai logo si disponible)
+      \fbox{\parbox{3cm}{\centering\vspace{8pt}\textbf{IIT}\\
+      \small Institut\\International\\Technologie\vspace{8pt}}}
+    \end{minipage}
+    \hfill
+    \begin{minipage}[t]{0.30\textwidth}
+      \raggedleft
+      \footnotesize
+      \textbf{وزارة التعليم العالي والبحث العلمي}\\[4pt]
+      \textbf{المدرسة العليا الدولية الخاصة للتكنولوجيا بصفاقس}
+    \end{minipage}
+
+    \vspace{0.5cm}
+    \noindent\rule{\textwidth}{0.8pt}
+    \vspace{1.5cm}
+
+    {\Huge\bfseries Projet de Fin d'Année}
+
+    \vspace{2cm}
+
+    {\large\itshape Réalisé par :}\\[0.5cm]
+    {\Large\bfseries Beya Abid}
+
+    \vspace{2cm}
+    \noindent\rule{0.6\textwidth}{0.6pt}\\[0.4cm]
+    {\LARGE\bfseries TNChatbot : Chatbot intelligent\\[0.3cm]
+    pour Tunisie Numérique}\\[0.4cm]
+    \noindent\rule{0.6\textwidth}{0.6pt}
+
+    \vspace{1.5cm}
+
+    {\normalsize\itshape Encadré par :}\\[0.3cm]
+    {\normalsize\bfseries [Nom de l'encadrant(e)]}
+
+    \vfill
+
+    \fbox{\parbox{0.5\textwidth}{\centering\vspace{4pt}
+    DÉPARTEMENT INFORMATIQUE\vspace{4pt}}}
+
+    \vspace{0.8cm}
+    {\bfseries Effectué le \today}
+
+    \vspace{0.5cm}
+    {\bfseries Année Universitaire 2024/2025}
+  \end{center}
+\end{titlepage}
+
+%------------------------------------------------------------
+% Numérotation romaine pour les pages préliminaires
+%------------------------------------------------------------
+\pagenumbering{roman}
+\setcounter{page}{1}
+
+%------------------------------------------------------------
+% REMERCIEMENTS
+%------------------------------------------------------------
+\chapter*{Remerciements}
+\addcontentsline{toc}{chapter}{Remerciements}
+
+Nous souhaitons adresser nos sincères remerciements à l'équipe de \textbf{Tunisie Numérique}
+pour la confiance accordée dans le cadre de ce projet et pour la richesse des échanges qui ont
+permis d'orienter les choix fonctionnels et techniques.
+
+Nous remercions également notre encadrant(e) académique pour sa disponibilité, ses
+conseils avisés et la rigueur avec laquelle il/elle a suivi l'avancement du projet. Sa capacité à
+guider notre réflexion dans les moments de doute a été une aide précieuse tout au long de cette
+expérience.
+
+Enfin, nous exprimons notre gratitude envers l'Institut International de Technologie
+de Sfax pour la qualité de la formation dispensée, ainsi qu'envers les membres du jury qui ont
+accepté d'évaluer ce travail.
+
+%------------------------------------------------------------
+% RÉSUMÉ
+%------------------------------------------------------------
+\chapter*{Résumé}
+\addcontentsline{toc}{chapter}{Résumé}
+
+Ce rapport présente la conception et le développement de \textbf{TNChatbot}, un assistant
+conversationnel intelligent destiné à la plateforme de médias numériques \textbf{Tunisie
+Numérique}. L'objectif principal est d'automatiser la qualification commerciale des prospects
+en leur proposant un parcours guidé permettant de découvrir les offres publicitaires, d'obtenir
+une recommandation selon leur budget, et de laisser leurs coordonnées à l'équipe commerciale.
+
+La solution repose sur une architecture microservices déployée via Docker Compose,
+combinant un frontend \textbf{Next.js}, un backend \textbf{FastAPI}, une base de données
+\textbf{PostgreSQL}, un moteur de recherche vectorielle \textbf{Qdrant} et un modèle de
+langage local via \textbf{Ollama}. Un pipeline \textbf{RAG} (\textit{Retrieval-Augmented
+Generation}) hybride — combinant recherche vectorielle et lexicale BM25 — garantit la
+pertinence des réponses factuelles.
+
+Le projet a été réalisé en trois sprints selon une méthodologie Kanban : mise en place
+de l'infrastructure et du pipeline d'ingestion, amélioration de la qualité de l'IA (classifieur
+d'intention hybride, découpage sémantique, RAG conditionnel), puis renforcement de la
+sécurité par authentification JWT et mise en place d'une suite de tests de non-régression.
+
+\textbf{Mots-clés :} Chatbot, RAG, Retrieval-Augmented Generation, LLM, FastAPI,
+Next.js, Qdrant, BM25, Docker, Intent Classification, NLP.
+
+%------------------------------------------------------------
+% TABLE DES MATIÈRES
+%------------------------------------------------------------
+\tableofcontents
+\addcontentsline{toc}{chapter}{Table des matières}
+
+%------------------------------------------------------------
+% TABLE DES FIGURES
+%------------------------------------------------------------
+\listoffigures
+\addcontentsline{toc}{chapter}{Table des figures}
+
+%------------------------------------------------------------
+% LISTE DES TABLEAUX
+%------------------------------------------------------------
+\listoftables
+\addcontentsline{toc}{chapter}{Liste des tableaux}
+
+%------------------------------------------------------------
+% Numérotation arabe pour le corps du document
+%------------------------------------------------------------
+\pagenumbering{arabic}
+\setcounter{page}{1}
+
+%============================================================
+% INTRODUCTION GÉNÉRALE
+%============================================================
+\chapter*{Introduction Générale}
+\addcontentsline{toc}{chapter}{Introduction Générale}
+\markboth{Introduction Générale}{}
+
+\lettrine[lines=2]{D}{ans} un contexte de transformation digitale accélérée, les plateformes
+de médias en ligne font face à un défi croissant : répondre efficacement aux sollicitations
+commerciales d'un nombre grandissant de prospects tout en maintenant la qualité du service.
+\textbf{Tunisie Numérique}, l'un des portails d'information numérique les plus visités en
+Tunisie, n'échappe pas à cette réalité.
+
+Aujourd'hui, le processus de découverte des offres publicitaires — bannières display,
+contenus sponsorisés, vidéos, newsletters — repose encore largement sur des échanges manuels
+entre les prospects et l'équipe commerciale. Ce modèle génère un volume important de
+questions répétitives, ralentit la qualification des leads et monopolise des ressources humaines
+qui pourraient être consacrées à des interactions à plus forte valeur ajoutée.
+
+C'est dans ce cadre que s'inscrit le projet \textbf{TNChatbot} : concevoir et déployer un
+assistant conversationnel intelligent capable d'informer, d'orienter et de qualifier les prospects
+de manière autonome, tout en garantissant la pertinence des réponses grâce à une base de
+connaissances structurée.
+
+La solution proposée combine un parcours conversationnel guidé, un moteur de réponse
+enrichi par la technologie \textit{Retrieval-Augmented Generation} (RAG), et une logique de
+qualification commerciale via des formulaires de capture de leads. L'ensemble est déployable
+localement via Docker Compose, ce qui garantit la reproductibilité des environnements et
+facilite la mise en production.
+
+Ce rapport est organisé comme suit. Le \textbf{chapitre 1} pose les bases du projet en
+analysant le contexte, la problématique, les solutions existantes et la méthodologie adoptée.
+Le \textbf{chapitre 2} détaille les choix de conception et l'architecture technique retenue.
+Enfin, le \textbf{chapitre 3} présente la réalisation concrète du projet, sprint par sprint, en
+mettant en lumière les décisions techniques et les résultats obtenus.
+
+%============================================================
+% CHAPITRE 1 — ÉTUDE PRÉALABLE
+%============================================================
+\chapter{Étude Préalable}
+\minitoc
+\newpage
+
+%------------------------------------------------------------
+\section{Introduction}
+%------------------------------------------------------------
+
+Ce chapitre pose les bases de notre projet en présentant le contexte opérationnel de
+\textbf{Tunisie Numérique}, en identifiant les défis liés à la qualification commerciale
+manuelle, et en analysant les solutions conversationnelles existantes sur le marché. Cette
+étude préalable nous permet ensuite de définir précisément les objectifs du projet et de
+proposer une solution adaptée, avant d'exposer la méthodologie agile adoptée pour la
+conduite du développement.
+
+%------------------------------------------------------------
+\section{Cadre général du projet}
+%------------------------------------------------------------
+
+\subsection{Présentation de Tunisie Numérique}
+
+\textbf{Tunisie Numérique} est l'une des plateformes d'information digitale les plus influentes
+en Tunisie. Avec plusieurs millions de visiteurs uniques par mois, le portail couvre l'actualité
+politique, économique, culturelle et technologique du pays. Sa régie publicitaire propose
+aux annonceurs, agences et entreprises une gamme d'offres variées : bannières
+\textit{display}, contenus sponsorisés, vidéos pré-roll, newsletters et solutions premium.
+
+Dans cette logique de croissance commerciale, Tunisie Numérique cherche à améliorer
+l'expérience de ses prospects et à optimiser la productivité de son équipe commerciale. Le
+chatbot TNChatbot s'inscrit dans cette démarche de transformation digitale.
+
+\subsection{Problématique et motivations}
+
+Le processus de découverte des offres publicitaires de Tunisie Numérique repose
+actuellement sur des échanges manuels entre les prospects et l'équipe commerciale. Les
+principaux défis identifiés sont les suivants :
+
+\begin{itemize}
+  \item \textbf{Volume élevé de questions répétitives} : les prospects posent systématiquement
+  les mêmes questions sur les formats disponibles, les audiences et les tarifs.
+  \item \textbf{Difficulté à choisir rapidement une solution adaptée} : sans outil d'orientation,
+  les prospects peinent à identifier l'offre correspondant à leur budget et leurs objectifs.
+  \item \textbf{Qualification insuffisante des leads entrants} : les demandes de contact arrivent
+  sans contexte suffisant pour que l'équipe commerciale puisse les prioriser.
+  \item \textbf{Absence d'un canal automatisé} : aucun outil ne permet d'orienter les prospects
+  en dehors des heures ouvrables.
+\end{itemize}
+
+La problématique centrale est donc la suivante : \textit{comment proposer un assistant
+conversationnel capable d'informer, d'orienter et de qualifier efficacement les prospects,
+tout en garantissant la pertinence des réponses et la valeur commerciale des leads collectés ?}
+
+\subsection{Étude de l'existant}
+
+Plusieurs catégories de solutions conversationnelles existent sur le marché. Le tableau
+suivant présente une comparaison selon les critères les plus pertinents pour notre besoin.
+
+\begin{table}[H]
+\centering
+\caption{Comparaison des solutions conversationnelles existantes}
+\small
+\begin{tabularx}{\textwidth}{|l|X|X|X|X|}
+\hline
+\rowcolor{tableheader}
+\textbf{Critère} & \textbf{Chatbot à règles} & \textbf{Chatbot FAQ} & \textbf{LLM générique} & \textbf{RAG + LLM} \\
+\hline
+Pertinence métier & Faible & Moyenne & Moyenne & \textbf{Élevée} \\
+\hline
+Personnalisation & Faible & Faible & Moyenne & \textbf{Élevée} \\
+\hline
+Fiabilité factuelle & Moyenne & Élevée & Faible & \textbf{Élevée} \\
+\hline
+Collecte de leads & Non & Non & Non & \textbf{Oui} \\
+\hline
+Déploiement local & Oui & Oui & Non & \textbf{Oui} \\
+\hline
+Coût exploitation & Faible & Faible & Élevé & \textbf{Maîtrisé} \\
+\hline
+\end{tabularx}
+\label{tab:existant}
+\end{table}
+
+Les solutions à base de règles ou de FAQ sont limitées par leur incapacité à traiter des
+questions non prévues. Les LLM génériques (GPT-4, Claude) offrent de meilleures capacités
+de compréhension mais génèrent des hallucinations sur les données métier spécifiques. La
+combinaison \textbf{RAG + LLM local} représente la solution la plus adaptée : elle ancre les
+réponses dans une base documentaire vérifiée tout en permettant une interaction naturelle.
+
+\subsection{Solution proposée}
+
+Face aux limites des approches existantes, nous proposons \textbf{TNChatbot}, une
+solution hybride articulée autour de quatre composantes :
+
+\begin{enumerate}
+  \item \textbf{Parcours conversationnel guidé} : une machine à états orchestre le dialogue
+  selon les étapes clés (accueil, découverte des offres, recommandation budget, capture
+  de lead).
+  \item \textbf{Moteur RAG hybride} : les questions factuelles sont traitées via une recherche
+  combinant similarité vectorielle (\textit{embeddings}) et recherche lexicale BM25, permettant
+  une récupération précise des passages pertinents de la base documentaire.
+  \item \textbf{Modèle de langage local} : Ollama héberge un LLM local (compatible
+  API Ollama) qui génère des réponses naturelles enrichies par le contexte RAG, sans
+  dépendance à des services cloud tiers.
+  \item \textbf{Module de qualification commerciale} : des formulaires structurés collectent
+  les informations de contact et les transmettent à l'équipe commerciale sous forme de
+  leads exploitables.
+\end{enumerate}
+
+%------------------------------------------------------------
+\section{Méthodologie de travail}
+%------------------------------------------------------------
+
+\subsection{Méthode Kanban}
+
+Pour assurer une gestion efficace du projet dans un cadre PFE avec des contraintes de
+temps imposées, nous avons adopté une méthodologie \textbf{Kanban agile}. Cette approche
+présente plusieurs avantages adaptés à notre contexte :
+
+\begin{itemize}
+  \item \textbf{Visualisation du flux de travail} : un tableau Kanban divise les tâches en
+  colonnes « À faire », « En cours », « En revue » et « Terminé », offrant une visibilité
+  permanente sur l'avancement.
+  \item \textbf{Limitation du travail en cours (WIP)} : afin d'éviter la surcharge et de
+  maintenir une concentration sur les tâches prioritaires.
+  \item \textbf{Amélioration continue} : des points réguliers permettent d'ajuster les
+  priorités en fonction des retours de l'équipe Tunisie Numérique.
+  \item \textbf{Flexibilité} : la méthode s'adapte facilement aux changements de périmètre
+  sans perturber le flux existant.
+\end{itemize}
+
+\subsection{Planification des sprints}
+
+Le projet a été découpé en \textbf{trois sprints} selon une approche incrémentale.
+Chaque sprint livrait un ensemble de fonctionnalités opérationnelles.
+
+\begin{longtable}{|p{2.2cm}|p{7cm}|p{2.8cm}|}
+\caption{Planification des sprints du projet TNChatbot} \\
+\hline
+\rowcolor{tableheader}
+\textbf{Sprint} & \textbf{Objectifs et tâches} & \textbf{Durée} \\
+\hline
+\endfirsthead
+\multicolumn{3}{c}{\tablename\ \thetable\ — Suite} \\
+\hline
+\rowcolor{tableheader}
+\textbf{Sprint} & \textbf{Objectifs et tâches} & \textbf{Durée} \\
+\hline
+\endhead
+\hline
+\endfoot
+Sprint 0
+(Cadrage) &
+— Analyse du cahier des charges.\newline
+— Définition du périmètre fonctionnel.\newline
+— Choix des technologies.\newline
+— Mise en place de l'environnement Docker. &
+Semaines 1--2 \\
+\hline
+Sprint 1
+(Infrastructure) &
+— Configuration Docker Compose (6 conteneurs).\newline
+— Pipeline d'ingestion KB (chunking, embeddings, Qdrant).\newline
+— API conversationnelle (session, message, stream).\newline
+— Machine à états conversationnelle.\newline
+— Interface admin (discussions, leads, KB). &
+Semaines 3--6 \\
+\hline
+Sprint 2
+(Qualité IA) &
+— Classifieur d'intention hybride (règles + regex + score).\newline
+— Découpage sémantique par paragraphes.\newline
+— RAG conditionnel (\texttt{should\_trigger\_rag}).\newline
+— Ingestion idempotente par \texttt{source\_uri}. &
+Semaines 7--9 \\
+\hline
+Sprint 3
+(Sécurité \& Qualité) &
+— Authentification JWT HS256 (stdlib Python).\newline
+— Audit log des actions sensibles.\newline
+— Suite de tests non-régression (24 cas de test).\newline
+— Mise à jour du frontend pour Bearer token. &
+Semaines 10--12 \\
+\hline
+\label{tab:sprints}
+\end{longtable}
+
+%------------------------------------------------------------
+\section{Conclusion}
+%------------------------------------------------------------
+
+Ce chapitre a posé les fondations du projet en analysant le contexte opérationnel de
+Tunisie Numérique, les limites des solutions conversationnelles existantes, et en proposant
+une approche RAG + LLM local comme réponse adaptée. La méthodologie Kanban, articulée
+en trois sprints progressifs, fournit un cadre structuré pour la réalisation du projet.
+Le chapitre suivant détaille les choix de conception et l'architecture technique retenue.
+
+%============================================================
+% CHAPITRE 2 — CONCEPTION ET ARCHITECTURE
+%============================================================
+\chapter{Conception et Architecture}
+\minitoc
+\newpage
+
+%------------------------------------------------------------
+\section{Introduction}
+%------------------------------------------------------------
+
+Ce chapitre présente l'architecture générale de TNChatbot, les choix technologiques
+justifiés, le modèle de données, la machine à états conversationnelle et le pipeline RAG.
+Ces décisions de conception constituent le socle sur lequel s'appuie l'ensemble de la
+réalisation.
+
+%------------------------------------------------------------
+\section{Architecture générale du système}
+%------------------------------------------------------------
+
+TNChatbot repose sur une architecture \textbf{microservices} déployée via
+\textbf{Docker Compose}. Six conteneurs coopèrent pour former le système complet.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners=4pt, minimum width=2.8cm,
+              minimum height=1cm, align=center, font=\small},
+  arrow/.style={->, >=stealth, thick}
+]
+  % User
+  \node[box, fill=gray!10] (user) at (0,6) {Utilisateur\\(Navigateur)};
+
+  % Docker host
+  \draw[dashed, rounded corners=6pt]
+    (-4.5,-1) rectangle (9.5,5.5);
+  \node[font=\footnotesize\itshape] at (2.5,5.2) {Docker Host (docker-compose)};
+
+  % Frontend
+  \node[box, fill=blue!10] (front) at (-2,3.5) {frontend\\Next.js\\\small :19080};
+  \node[box, fill=blue!8] (proxy) at (-2,2) {API Proxy\\route.ts};
+
+  % Backend
+  \node[box, fill=green!10] (back) at (2,3.5) {backend\\FastAPI\\\small :8000};
+  \node[box, fill=green!8] (orch) at (0.5,1.5) {Orchestrateur\\state\_machine};
+  \node[box, fill=green!8] (rag) at (2.5,0.5) {Module RAG\\retrieve.py};
+  \node[box, fill=green!8] (leads) at (4.5,1.5) {Admin/\\Leads};
+  \node[box, fill=green!8] (llm_c) at (2.5,2.5) {LLM Client};
+
+  % Datastores
+  \node[box, fill=orange!10] (pg) at (-1,0) {postgres\\\small :5432};
+  \node[box, fill=purple!10] (qd) at (3,-0.7) {qdrant\\\small :6333};
+  \node[box, fill=red!10] (ollama) at (6.5,1) {ollama\\\small :11434};
+  \node[box, fill=red!8] (init) at (6.5,-0.5) {ollama-init};
+
+  % Arrows
+  \draw[arrow] (user) -- (front);
+  \draw[arrow] (front) -- (proxy);
+  \draw[arrow] (proxy) -- (back) node[midway, above, font=\tiny] {HTTP};
+  \draw[arrow] (back) -- (orch);
+  \draw[arrow] (back) -- (leads);
+  \draw[arrow] (orch) -- (rag);
+  \draw[arrow] (back) -- (llm_c);
+  \draw[arrow] (back) -- (pg) node[midway, left, font=\tiny] {SQL};
+  \draw[arrow] (rag) -- (qd) node[midway, right, font=\tiny] {vecteurs};
+  \draw[arrow] (llm_c) -- (ollama) node[midway, right, font=\tiny] {chat};
+  \draw[arrow] (init) -- (ollama) node[midway, right, font=\tiny] {pull};
+\end{tikzpicture}
+\caption{Architecture générale de TNChatbot — vue conteneurs}
+\label{fig:archi}
+\end{figure}
+
+Le flux est le suivant : l'utilisateur interagit avec l'interface Next.js, qui transmet les
+requêtes via un proxy HTTP au backend FastAPI. Ce dernier orchestre la logique
+conversationnelle via une machine à états, fait appel au module RAG si nécessaire,
+interagit avec PostgreSQL et Qdrant, puis délègue la génération de réponse à Ollama.
+
+%------------------------------------------------------------
+\section{Choix technologiques}
+%------------------------------------------------------------
+
+\begin{table}[H]
+\centering
+\caption{Comparaison et justification des choix technologiques}
+\small
+\begin{tabularx}{\textwidth}{|l|X|X|l|}
+\hline
+\rowcolor{tableheader}
+\textbf{Composant} & \textbf{Technologie retenue} & \textbf{Alternatives étudiées} & \textbf{Justification} \\
+\hline
+Frontend & Next.js 14 (React) & Vue.js, Angular & SSR, streaming SSE natif \\
+\hline
+Backend & FastAPI (Python) & Django, Flask, Express & Async natif, typing, OpenAPI \\
+\hline
+Base SQL & PostgreSQL & MySQL, SQLite & Robustesse, JSON, BM25 \\
+\hline
+Vectoriel & Qdrant & Pinecone, Weaviate, FAISS & Local, REST API, payload riche \\
+\hline
+LLM & Ollama & OpenAI API, Mistral & Local, pas de coût API \\
+\hline
+Conteneurs & Docker Compose & Kubernetes & Simplicité PFE, reproductible \\
+\hline
+\end{tabularx}
+\label{tab:techno}
+\end{table}
+
+\subsection{Backend — FastAPI}
+
+FastAPI a été retenu pour sa capacité à gérer nativement les requêtes asynchrones et
+le \textit{streaming} SSE (\textit{Server-Sent Events}), indispensables pour l'affichage
+progressif des réponses du chatbot. Sa génération automatique de documentation OpenAPI
+facilite la communication entre frontend et backend.
+
+\subsection{Base vectorielle — Qdrant}
+
+Qdrant stocke les vecteurs d'embedding associés aux chunks documentaires. Sa capacité
+à filtrer les résultats par métadonnées (\texttt{intent}, \texttt{section}) permet
+d'affiner le retrieval RAG selon le contexte conversationnel, sans requête secondaire.
+
+\subsection{LLM local — Ollama}
+
+Ollama expose une API compatible OpenAI pour les inférences de chat et la génération
+d'embeddings. L'hébergement local garantit la confidentialité des données prospects et
+élimine la dépendance à des services cloud tiers, ce qui est essentiel dans un contexte
+de données sensibles.
+
+%------------------------------------------------------------
+\section{Modèle de données}
+%------------------------------------------------------------
+
+Le schéma PostgreSQL organise les données en six tables principales :
+
+\begin{table}[H]
+\centering
+\caption{Description des tables principales de la base de données}
+\small
+\begin{tabularx}{\textwidth}{|l|X|}
+\hline
+\rowcolor{tableheader}
+\textbf{Table} & \textbf{Rôle} \\
+\hline
+\texttt{chat\_sessions} & Une ligne par session utilisateur (id, step, created\_at) \\
+\hline
+\texttt{chat\_messages} & Historique des messages (role, content, step, session\_id) \\
+\hline
+\texttt{leads} & Données de contact collectées (nom, société, email, téléphone) \\
+\hline
+\texttt{kb\_documents} & Métadonnées des documents ingérés (source\_uri, title, status) \\
+\hline
+\texttt{kb\_chunks} & Chunks et leurs embeddings JSON, liés à kb\_documents \\
+\hline
+\texttt{kb\_ingestion\_runs} & Traçabilité des runs d'ingestion (status, stats JSON) \\
+\hline
+\texttt{admin\_config} & Configuration métier clé/valeur (audience, offres, email) \\
+\hline
+\end{tabularx}
+\label{tab:schema}
+\end{table}
+
+%------------------------------------------------------------
+\section{Machine à états conversationnelle}
+%------------------------------------------------------------
+
+L'orchestration du dialogue repose sur une \textbf{machine à états finis} implémentée
+dans \texttt{state\_machine.py}. Chaque état correspond à une étape du parcours
+utilisateur.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  state/.style={draw, rounded corners=4pt, minimum width=2.8cm,
+                minimum height=0.8cm, align=center, font=\small},
+  arrow/.style={->, >=stealth, thick, font=\tiny}
+]
+  \node[state, fill=gray!15] (welcome) at (0,6) {WELCOME\_SCOPE};
+  \node[state] (menu) at (0,4.5) {MAIN\_MENU};
+  \node[state, fill=blue!8] (audience) at (-4,3) {AUDIENCE};
+  \node[state, fill=blue!8] (solutions) at (0,3) {SOLUTIONS\_MENU};
+  \node[state, fill=blue!8] (budget) at (4,3) {BUDGET\_CLIENT\_TYPE};
+  \node[state, fill=green!8] (display) at (-3,1.5) {SOLUTION\_DISPLAY};
+  \node[state, fill=green!8] (video) at (0,1.5) {SOLUTION\_VIDEO};
+  \node[state, fill=orange!8] (form) at (4,1.5) {FORM\_STANDARD\_*};
+  \node[state, fill=red!8] (oos) at (-4,4.5) {OUT\_OF\_SCOPE\_READER};
+
+  \draw[arrow] (welcome) -- (menu);
+  \draw[arrow] (menu) -- node[left]{audience} (audience);
+  \draw[arrow] (menu) -- node[right,near start]{solutions} (solutions);
+  \draw[arrow] (menu) -- node[right]{budget} (budget);
+  \draw[arrow] (solutions) -- (display);
+  \draw[arrow] (solutions) -- (video);
+  \draw[arrow] (budget) -- (form);
+  \draw[arrow, dashed] (welcome) -- node[above]{\scriptsize lecteur} (oos);
+\end{tikzpicture}
+\caption{Machine à états conversationnelle (états principaux)}
+\label{fig:fsm}
+\end{figure}
+
+Les étapes de type \textbf{wizard} (formulaires) et \textbf{statiques} (menus) sont
+traitées avant l'appel au pipeline RAG, évitant tout appel d'embedding inutile.
+
+%------------------------------------------------------------
+\section{Pipeline RAG}
+%------------------------------------------------------------
+
+Le pipeline RAG (\textit{Retrieval-Augmented Generation}) se déroule en huit étapes
+lorsqu'une question factuelle est détectée.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  step/.style={draw, fill=blue!8, rounded corners=4pt,
+               minimum width=3cm, minimum height=0.7cm, align=center, font=\small},
+  arrow/.style={->, >=stealth, thick}
+]
+  \node[step] (q) at (0,8) {Question utilisateur};
+  \node[step] (intent) at (0,7) {Détection d'intention};
+  \node[step] (trigger) at (0,6) {should\_trigger\_rag()};
+  \node[step, fill=orange!8] (embed) at (0,5) {Embedding requête};
+  \node[step] (vector) at (-3,4) {Recherche Qdrant\\(vectorielle)};
+  \node[step] (bm25) at (3,4) {Recherche BM25\\(lexicale)};
+  \node[step] (rrf) at (0,3) {Fusion RRF + Reranking};
+  \node[step, fill=green!8] (ctx) at (0,2) {Construction contexte RAG};
+  \node[step, fill=green!8] (llm) at (0,1) {Génération LLM};
+  \node[step] (resp) at (0,0) {Réponse + métadonnées RAG};
+
+  \foreach \from/\to in {q/intent, intent/trigger, trigger/embed,
+                          embed/vector, embed/bm25,
+                          vector/rrf, bm25/rrf,
+                          rrf/ctx, ctx/llm, llm/resp}
+    \draw[arrow] (\from) -- (\to);
+\end{tikzpicture}
+\caption{Pipeline RAG hybride de TNChatbot}
+\label{fig:rag}
+\end{figure}
+
+\paragraph{Ingestion.}
+Les fichiers source (\texttt{.txt}, \texttt{.md}) du dossier \texttt{kb\_sources/} sont
+découpés en chunks sémantiques (par paragraphes), vectorisés via Ollama embeddings, puis
+stockés dans Qdrant (vecteurs + payload métadonnées) et PostgreSQL (métadonnées + contenu).
+
+\paragraph{Retrieval hybride.}
+La recherche combine similarité cosine dans Qdrant et BM25 sur \texttt{kb\_chunks}, les
+résultats étant fusionnés via \textit{Reciprocal Rank Fusion} (RRF) puis rerankés
+lexicalement (ou via Cohere si la clé API est disponible).
+
+%------------------------------------------------------------
+\section{Conclusion}
+%------------------------------------------------------------
+
+L'architecture modulaire adoptée — microservices conteneurisés, séparation stricte des
+responsabilités, pipeline RAG hybride — garantit à la fois la maintenabilité du système et
+sa capacité à évoluer. Le chapitre suivant présente la réalisation concrète, sprint par sprint.
+
+%============================================================
+% CHAPITRE 3 — RÉALISATION
+%============================================================
+\chapter{Réalisation}
+\minitoc
+\newpage
+
+%------------------------------------------------------------
+\section{Introduction}
+%------------------------------------------------------------
+
+Ce chapitre présente la réalisation technique du projet, organisée en trois sprints
+successifs. Pour chaque sprint, nous détaillons les objectifs, les décisions techniques clés,
+les extraits de code les plus significatifs et les résultats obtenus. La dernière section
+présente les interfaces utilisateur et administrateur développées.
+
+%------------------------------------------------------------
+\section{Sprint 1 — Infrastructure et pipeline d'ingestion}
+%------------------------------------------------------------
+
+\subsection{Configuration Docker Compose}
+
+La stack est définie dans \texttt{infra/docker-compose.yml} et comprend six services.
+Chaque service est configuré avec des variables d'environnement permettant une
+personnalisation sans modification du code source.
+
+\begin{lstlisting}[language=bash, caption={Démarrage de la stack Docker Compose}, label={lst:docker}]
+# Démarrage complet de la stack
+docker compose -f infra/docker-compose.yml up -d
+
+# Vérification de l'état des conteneurs
+docker compose -f infra/docker-compose.yml ps
+
+# Rebuild après modification du code backend
+docker compose -f infra/docker-compose.yml build backend
+docker compose -f infra/docker-compose.yml up -d backend
+\end{lstlisting}
+
+\subsection{Pipeline d'ingestion de la base de connaissances}
+
+Le pipeline d'ingestion (\texttt{ingest.py}) transforme les fichiers sources en vecteurs
+exploitables par le moteur RAG. Le processus se déroule en cinq étapes :
+
+\begin{enumerate}
+  \item \textbf{Découverte des fichiers} : parcours du dossier \texttt{kb\_sources/}
+  (filtres : \texttt{.md}, \texttt{.txt}, hors fichiers de training/synthétiques).
+  \item \textbf{Découpage sémantique} : chaque fichier est découpé en chunks respectant
+  les frontières de paragraphes (double saut de ligne).
+  \item \textbf{Génération des embeddings} : appel à l'API Ollama par batches avec retry.
+  \item \textbf{Persistance duale} : métadonnées en PostgreSQL, vecteurs dans Qdrant.
+  \item \textbf{Traçabilité} : chaque run d'ingestion est enregistré dans
+  \texttt{kb\_ingestion\_runs}.
+\end{enumerate}
+
+\subsection{API conversationnelle}
+
+Le backend expose quatre endpoints principaux :
+
+\begin{table}[H]
+\centering
+\caption{Endpoints de l'API conversationnelle}
+\small
+\begin{tabularx}{\textwidth}{|l|l|X|}
+\hline
+\rowcolor{tableheader}
+\textbf{Méthode} & \textbf{Route} & \textbf{Rôle} \\
+\hline
+POST & \texttt{/api/chat/session} & Crée une session, initialise l'étape \\
+\hline
+POST & \texttt{/api/chat/message} & Traitement synchrone complet (RAG + LLM) \\
+\hline
+POST & \texttt{/api/chat/stream} & Même logique en streaming SSE \\
+\hline
+GET & \texttt{/health} & Healthcheck pour discovery admin/frontend \\
+\hline
+\end{tabularx}
+\label{tab:api}
+\end{table}
+
+%------------------------------------------------------------
+\section{Sprint 2 — Qualité de l'intelligence artificielle}
+%------------------------------------------------------------
+
+Le Sprint 2 a ciblé trois dettes techniques majeures identifiées dans le Sprint 1 :
+la fragilité du classifieur d'intention, la mauvaise qualité du découpage documentaire,
+et le déclenchement systématique du pipeline RAG.
+
+\subsection{Classifieur d'intention hybride}
+
+\subsubsection{Problème initial}
+
+Le classifieur original utilisait un dictionnaire de mots-clés bruts, sensible à la casse
+et aux accents, et retournait le premier intent correspondant (ordre arbitraire).
+Ce comportement générait des erreurs dès qu'un utilisateur employait un synonyme
+ou une graphie alternative (« bannière » au lieu de « banniere »).
+
+\subsubsection{Solution implémentée}
+
+Le nouveau classifieur repose sur la structure \texttt{INTENT\_RULES}, un tableau de
+quadruplets \texttt{(intent, keywords, patterns\_regex, weight)}.
+
+\begin{lstlisting}[language=Python, caption={Structure INTENT\_RULES du classifieur hybride},
+                   label={lst:intent_rules}]
+INTENT_RULES: List[Tuple[str, List[str], List[str], float]] = [
+    ("display", [
+        "display", "banniere", "bannieres", "banner",
+        "leaderboard", "mpu", "encart", "visuel",
+    ], [r"banniere.*pub", r"format.*display"], 1.0),
+    ("video", [
+        "video", "preroll", "instream", "outstream",
+        "live", "youtube", "stream",
+    ], [r"format.*video", r"pub.*video"], 1.0),
+    # ... autres intents
+]
+
+def classify_intent(user_message: str) -> Optional[str]:
+    normalized = _normalize_text(user_message)  # accents, casse, ponctuation
+    best_intent, best_score = None, 0.0
+    for intent, keywords, patterns, weight in INTENT_RULES:
+        hits = sum(1 for kw in keywords if kw in normalized)
+        regex = sum(1 for p in patterns if re.search(p, normalized))
+        score = (hits + regex * 2) * weight
+        if score > best_score:
+            best_score, best_intent = score, intent
+    return best_intent
+\end{lstlisting}
+
+\paragraph{Normalisation.} La fonction \texttt{\_normalize\_text()} décompose le texte
+en NFD (Unicode), supprime les diacritiques et remplace la ponctuation par des espaces.
+Ainsi, « Bannières publicitaires » devient « bannieres publicitaires » avant la recherche.
+
+\paragraph{Score pondéré.} Le score est calculé comme
+\(\text{score} = (\text{hits\_keywords} + 2 \times \text{hits\_regex}) \times \text{weight}\).
+Les patterns regex ont un bonus $\times 2$ pour récompenser les correspondances
+contextuelles plus spécifiques. L'intent avec le meilleur score global gagne.
+
+\subsection{Découpage sémantique par paragraphes}
+
+\subsubsection{Problème initial}
+
+La fonction \texttt{chunk\_text()} découpait le texte mot à mot, ignorant complètement
+les frontières sémantiques. Un chunk pouvait ainsi contenir la fin d'une section et le
+début d'une autre, dégradant la cohérence contextuelle et la pertinence du retrieval RAG.
+
+\subsubsection{Solution implémentée}
+
+\begin{lstlisting}[language=Python, caption={Découpage sémantique par paragraphes},
+                   label={lst:chunking}]
+def chunk_text(text: str, max_tokens: int, overlap: int) -> List[str]:
+    # 1. Découper par frontières naturelles (double newline)
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    chunks, current_words = [], []
+
+    for para in paragraphs:
+        para_words = para.split()
+        # Paragraphe seul trop long -> découper par mots avec overlap
+        if len(para_words) > max_tokens:
+            if current_words:
+                chunks.append(" ".join(current_words))
+                current_words = []
+            # Découpage par fenêtre glissante
+            start = 0
+            while start < len(para_words):
+                end = min(start + max_tokens, len(para_words))
+                chunks.append(" ".join(para_words[start:end]))
+                if end == len(para_words): break
+                start = max(0, end - overlap)
+        # Ajout dépasse la limite -> flush + overlap
+        elif current_words and len(current_words) + len(para_words) > max_tokens:
+            chunks.append(" ".join(current_words))
+            current_words = (current_words[-overlap:] if overlap else []) + para_words
+        else:
+            current_words.extend(para_words)
+
+    if current_words:
+        chunks.append(" ".join(current_words))
+    return [c for c in chunks if c.strip()]
+\end{lstlisting}
+
+Le nouveau découpage respecte les unités sémantiques naturelles du texte (paragraphes
+Markdown, sections), ce qui améliore significativement la cohérence des chunks indexés.
+
+\subsection{RAG conditionnel}
+
+\subsubsection{Problème initial}
+
+La fonction \texttt{should\_trigger\_rag()} retournait systématiquement \texttt{True},
+déclenchant l'appel à l'API d'embeddings et la recherche Qdrant pour \textit{chaque}
+message, y compris les simples clics de boutons de navigation.
+
+\subsubsection{Solution implémentée}
+
+\begin{lstlisting}[language=Python, caption={Déclenchement conditionnel du RAG},
+                   label={lst:rag_trigger}]
+STEPS_NO_RAG = {
+    "FORM_STANDARD_EMAIL", "FORM_STANDARD_PHONE", "FORM_STANDARD_DONE",
+    "BUDGET_CLIENT_TYPE", "BUDGET_OBJECTIVE", "WELCOME_SCOPE",
+    # ... toutes les étapes wizard/formulaire
+}
+
+INTENTS_TRIGGERING_RAG = {
+    "audience", "display", "video", "content",
+    "newsletter_audio", "immoneuf", "premium", "mag",
+}
+
+def should_trigger_rag(intent: Optional[str], user_message: str,
+                        step: Optional[str] = None) -> bool:
+    # Règle 1 : jamais sur étapes wizard/formulaire
+    if step and step.upper() in STEPS_NO_RAG:
+        return False
+    # Règle 2 : toujours si intent documentaire reconnu
+    if intent and intent in INTENTS_TRIGGERING_RAG:
+        return True
+    # Règle 3 : si question factuelle (? ou token factuel)
+    if is_factual_question(user_message):
+        return True
+    # Sinon : pas de RAG (navigation de menu)
+    return False
+\end{lstlisting}
+
+\subsection{Ingestion idempotente}
+
+L'ingestion est rendue idempotente par vérification préalable : si un document avec
+le même \texttt{source\_uri} existe déjà avec \texttt{status='ready'}, il est ignoré
+(sauf si \texttt{force=True}). En mode force, les anciens chunks sont supprimés de
+PostgreSQL \textit{et} de Qdrant avant réingestion.
+
+\begin{lstlisting}[language=Python, caption={Vérification d'idempotence dans ingest\_sources()},
+                   label={lst:idempotent}]
+existing = conn.execute(
+    """SELECT id FROM kb_documents
+       WHERE source_uri = %s AND status = 'ready'
+       ORDER BY created_at DESC LIMIT 1""",
+    (source_uri,),
+).fetchone()
+
+if existing and not force:
+    stats["skipped"] += 1
+    continue  # Document déjà indexé, on passe au suivant
+
+if existing and force:
+    # Purger l'ancienne version (DB + Qdrant)
+    old_chunk_ids = _delete_document_chunks(conn, existing[0])
+    delete_qdrant_points(old_chunk_ids)
+    conn.execute("DELETE FROM kb_documents WHERE id = %s", (existing[0],))
+    stats["updated"] += 1
+\end{lstlisting}
+
+%------------------------------------------------------------
+\section{Sprint 3 — Sécurité et qualité logicielle}
+%------------------------------------------------------------
+
+\subsection{Authentification JWT HS256}
+
+\subsubsection{Problème initial}
+
+L'interface d'administration était protégée uniquement par un mot de passe statique
+transmis en clair dans le header \texttt{X-Admin-Password}. Ce mécanisme ne permettait
+ni expiration des sessions, ni audit des accès, et exposait le mot de passe en clair
+dans les logs réseau.
+
+\subsubsection{Implémentation JWT stdlib}
+
+Afin d'éviter toute dépendance externe, le JWT HS256 a été implémenté avec la bibliothèque
+standard Python (\texttt{hmac}, \texttt{hashlib}, \texttt{base64}).
+
+\begin{lstlisting}[language=Python, caption={Implémentation JWT HS256 (stdlib Python)},
+                   label={lst:jwt}]
+def _encode_jwt() -> str:
+    secret = os.getenv("JWT_SECRET") or os.getenv("ADMIN_PASSWORD")
+    ttl    = int(os.getenv("JWT_TTL_MINUTES", "60"))
+    header  = _b64url_encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    now     = int(time.time())
+    payload = _b64url_encode(json.dumps({
+        "sub": "admin", "iat": now, "exp": now + ttl * 60
+    }).encode())
+    signing_input = f"{header}.{payload}"
+    sig = _b64url_encode(
+        hmac.new(secret.encode(), signing_input.encode(),
+                 hashlib.sha256).digest()
+    )
+    return f"{signing_input}.{sig}"
+
+def require_admin_password(
+    x_admin_password: str | None = Header(None),
+    authorization:    str | None = Header(None),
+) -> None:
+    # Mode JWT (recommandé)
+    if authorization and authorization.startswith("Bearer "):
+        _decode_jwt(authorization.removeprefix("Bearer ").strip())
+        return
+    # Rétrocompatibilité : mot de passe statique
+    _ensure_admin_password(x_admin_password)
+\end{lstlisting}
+
+\paragraph{Variables d'environnement.}
+\begin{itemize}
+  \item \texttt{JWT\_SECRET} : secret HMAC (défaut = \texttt{ADMIN\_PASSWORD})
+  \item \texttt{JWT\_TTL\_MINUTES} : durée de validité du token (défaut = 60 min)
+  \item \texttt{ADMIN\_PASSWORD} : mot de passe de connexion admin
+\end{itemize}
+
+\subsection{Audit log}
+
+Les actions sensibles génèrent des entrées structurées dans les logs applicatifs :
+
+\begin{lstlisting}[language=Python, caption={Exemples d'entrées d'audit log},
+                   label={lst:audit}]
+# Connexion réussie
+LOGGER.info("audit action=login status=success")
+
+# Suppression d'un document KB
+LOGGER.info("audit action=delete_kb_document document_id=%s title=%s chunks=%s",
+            doc_id, title, len(chunk_ids))
+
+# Lancement d'une ingestion
+LOGGER.info("audit action=ingestion_start title=%s source_uri=%s source_type=%s",
+            title, source_uri, source_type)
+\end{lstlisting}
+
+\subsection{Tests de non-régression}
+
+Une suite de 24 tests unitaires a été développée dans \texttt{test\_sprint2.py},
+couvrant les quatre fonctions modifiées au Sprint 2.
+
+\begin{table}[H]
+\centering
+\caption{Résultats de la suite de tests non-régression (Sprint 2)}
+\small
+\begin{tabularx}{\textwidth}{|l|c|X|}
+\hline
+\rowcolor{tableheader}
+\textbf{Module testé} & \textbf{Cas de test} & \textbf{Couverture} \\
+\hline
+\texttt{classify\_intent()} & 8 & Normalisation accents, best-score, regex bonus, absence de match \\
+\hline
+\texttt{chunk\_text()} & 8 & Paragraphes, overlap, texte long, vide, frontières préservées \\
+\hline
+\texttt{should\_trigger\_rag()} & 6 & Step wizard (False), intent RAG (True), question factuelle (True), navigation (False) \\
+\hline
+\texttt{ingest\_sources()} & 2 & Skip idempotent, force réingestion \\
+\hline
+\textbf{Total} & \textbf{24} & \textbf{Tous passing} \\
+\hline
+\end{tabularx}
+\label{tab:tests}
+\end{table}
+
+Pour exécuter la suite de tests :
+
+\begin{lstlisting}[language=bash, caption={Exécution des tests},
+                   label={lst:pytest}]
+# Depuis la racine du projet
+cd backend
+pytest tests/test_sprint2.py -v
+
+# Résultat attendu
+tests/test_sprint2.py::TestClassifyIntent::test_normalise_accent PASSED
+tests/test_sprint2.py::TestChunkText::test_paragraph_boundary_preserved PASSED
+tests/test_sprint2.py::TestShouldTriggerRag::test_false_on_form_step PASSED
+# ... 24 tests PASSED in 0.8s
+\end{lstlisting}
+
+%------------------------------------------------------------
+\section{Interface utilisateur}
+%------------------------------------------------------------
+
+\subsection{Interface de chat}
+
+L'interface de chat Next.js offre une expérience conversationnelle guidée accessible
+depuis un navigateur web standard.
+
+Les fonctionnalités principales sont :
+\begin{itemize}
+  \item \textbf{Menu d'accueil} avec boutons d'orientation (Audience, Solutions, Budget,
+  Rappel) permettant à l'utilisateur de choisir son parcours sans avoir à formuler une requête.
+  \item \textbf{Parcours budgétaire} guidé : une série de questions (type d'annonceur,
+  objectif marketing, tranche de budget) aboutit à une recommandation personnalisée.
+  \item \textbf{Réponses RAG} pour les questions factuelles : le chatbot récupère les
+  passages pertinents de la base documentaire et génère une réponse contextualisée.
+  \item \textbf{Formulaires de leads} structurés : collecte des informations de contact
+  avec validation des champs obligatoires.
+  \item \textbf{Streaming} : les réponses du LLM s'affichent progressivement, améliorant
+  la perception de réactivité.
+\end{itemize}
+
+\subsection{Comportement conversationnel — exemples}
+
+\begin{table}[H]
+\centering
+\caption{Exemples de parcours conversationnels et comportements attendus}
+\small
+\begin{tabularx}{\textwidth}{|X|l|X|}
+\hline
+\rowcolor{tableheader}
+\textbf{Message utilisateur} & \textbf{Step} & \textbf{Comportement} \\
+\hline
+« Bonjour » & WELCOME\_SCOPE & Présentation + boutons d'orientation \\
+\hline
+« Quel est le CPM du display ? » & MAIN\_MENU & RAG → réponse avec tarifs depuis KB \\
+\hline
+[Clic bouton Budget] & MAIN\_MENU & Transition vers BUDGET\_CLIENT\_TYPE \\
+\hline
+« Grande entreprise » & BUDGET\_CLIENT\_TYPE & Transition wizard suivante (pas de RAG) \\
+\hline
+« Je veux être rappelé » & n.a. & Déclenchement formulaire FORM\_STANDARD \\
+\hline
+\end{tabularx}
+\label{tab:uc}
+\end{table}
+
+%------------------------------------------------------------
+\section{Interface d'administration}
+%------------------------------------------------------------
+
+L'interface d'administration est accessible à l'URL \texttt{/admin}. Elle comprend
+cinq onglets fonctionnels.
+
+\subsection{Tableau de bord (Overview)}
+
+La page d'accueil admin affiche les compteurs globaux :
+\begin{itemize}
+  \item Nombre de sessions de conversation initiées
+  \item Nombre de messages échangés
+  \item Nombre de fiches de contact collectées (leads)
+  \item Nombre de documents KB indexés et de chunks générés
+\end{itemize}
+
+\subsection{Gestion de la base de connaissances}
+
+L'onglet KB permet de visualiser les documents ingérés (titre, source, statut, nombre
+de chunks) et de les supprimer. La suppression d'un document déclenche automatiquement
+la purge des chunks associés dans PostgreSQL et Qdrant.
+
+\subsection{Ingestion manuelle}
+
+L'onglet Ingestion propose un workflow en plusieurs étapes :
+\begin{enumerate}
+  \item \textbf{Upload} : importation d'un fichier (\texttt{.txt}, \texttt{.md},
+  \texttt{.json}, \texttt{.jsonl}, \texttt{.pdf})
+  \item \textbf{Prévisualisation} : affichage du découpage en chunks avant indexation
+  \item \textbf{Exécution} : lancement de l'ingestion complète avec logs temps réel (NDJSON)
+\end{enumerate}
+
+\subsection{Authentification et sécurité}
+
+Depuis le Sprint 3, la connexion admin génère un token JWT retourné dans la réponse
+de login. Toutes les requêtes suivantes utilisent ce token via le header
+\texttt{Authorization: Bearer <token>}. Le token expire après 60 minutes (configurable
+via \texttt{JWT\_TTL\_MINUTES}). La rétrocompatibilité avec \texttt{X-Admin-Password}
+est maintenue pour la transition.
+
+%------------------------------------------------------------
+\section{Déploiement en production}
+%------------------------------------------------------------
+
+\subsection{Variables d'environnement clés}
+
+\begin{table}[H]
+\centering
+\caption{Variables d'environnement principales}
+\small
+\begin{tabularx}{\textwidth}{|l|l|X|}
+\hline
+\rowcolor{tableheader}
+\textbf{Variable} & \textbf{Valeur par défaut} & \textbf{Rôle} \\
+\hline
+\texttt{ADMIN\_PASSWORD} & \texttt{change\_me} & Mot de passe admin (à changer en prod) \\
+\hline
+\texttt{JWT\_SECRET} & = ADMIN\_PASSWORD & Secret HMAC pour signature JWT \\
+\hline
+\texttt{JWT\_TTL\_MINUTES} & \texttt{60} & Durée de validité du token JWT \\
+\hline
+\texttt{EMBEDDING\_URL} & localhost:8001 & Endpoint API embeddings Ollama \\
+\hline
+\texttt{RAG\_CHUNK\_SIZE} & \texttt{200} & Taille max d'un chunk (en mots) \\
+\hline
+\texttt{RAG\_LEXICAL\_WEIGHT} & \texttt{0.35} & Poids BM25 dans la fusion hybride \\
+\hline
+\end{tabularx}
+\label{tab:env}
+\end{table}
+
+\subsection{Procédure de mise à jour en production}
+
+\begin{lstlisting}[language=bash, caption={Procédure de mise à jour sur le serveur},
+                   label={lst:deploy}]
+# Récupération des dernières modifications
+git pull origin main
+
+# Rebuild et redémarrage du backend et frontend
+docker compose -f infra/docker-compose.yml build backend frontend
+docker compose -f infra/docker-compose.yml up -d backend frontend
+
+# Si modification du schéma de données (migrations SQL)
+docker compose -f infra/docker-compose.yml exec backend \
+    python -m scripts.migrate
+
+# Réingestion KB après modification des fichiers sources
+docker compose -f infra/docker-compose.yml exec backend \
+    python -c "from app.rag.ingest import ingest_sources; \
+               ingest_sources(force=True)"
+\end{lstlisting}
+
+%------------------------------------------------------------
+\section{Conclusion}
+%------------------------------------------------------------
+
+Les trois sprints ont permis de livrer progressivement un système conversationnel
+complet et opérationnel. Le Sprint 1 a posé l'infrastructure technique. Le Sprint 2 a
+significativement amélioré la qualité de l'IA en rendant le classifieur plus robuste,
+le chunking plus cohérent et le pipeline RAG plus efficace. Le Sprint 3 a sécurisé
+l'accès administratif et garanti la non-régression via une suite de tests automatisés.
+L'ensemble forme une solution déployable, maintenable et évolutive.
+
+%============================================================
+% CONCLUSION ET PERSPECTIVES
+%============================================================
+\chapter*{Conclusion et perspectives}
+\addcontentsline{toc}{chapter}{Conclusion et perspectives}
+\markboth{Conclusion et perspectives}{}
+
+\lettrine[lines=2]{C}{e} projet a permis de concevoir et de déployer \textbf{TNChatbot},
+un assistant conversationnel intelligent pour Tunisie Numérique. En combinant un parcours
+guidé par machine à états, un moteur RAG hybride (vectoriel + BM25) et un modèle de
+langage hébergé localement via Ollama, la solution répond concrètement aux besoins
+identifiés : qualifier les prospects, présenter les offres publicitaires et collecter des leads
+exploitables pour l'équipe commerciale.
+
+\paragraph{Bilan technique.}
+Les cinq cas d'usage principaux (découverte de l'audience, exploration des solutions,
+recommandation budget, questions factuelles RAG, capture de leads) sont opérationnels
+et testés. L'architecture modulaire microservices garantit la maintenabilité et facilite
+l'évolution du système. La suite de 24 tests non-régression protège les fonctionnalités
+clés contre les régressions futures.
+
+\paragraph{Limites identifiées.}
+La qualité des réponses RAG reste directement liée à la richesse et à la mise à jour
+régulière des fichiers sources dans \texttt{kb\_sources/}. Par ailleurs, l'utilisation d'un
+LLM local impose des contraintes de ressources matérielles qui peuvent impacter les
+performances en charge.
+
+\paragraph{Perspectives d'évolution.}
+Plusieurs axes d'amélioration sont envisageables à court et moyen terme :
+\begin{itemize}
+  \item \textbf{Observabilité} : intégration d'un tableau de bord Prometheus/Grafana pour
+  surveiller les métriques de performance en temps réel (latence, taux de fallback,
+  taux de conversion en lead).
+  \item \textbf{RBAC admin} : ajout d'un système de rôles (éditeur, opérateur, administrateur)
+  sur les endpoints sensibles de l'interface d'administration.
+  \item \textbf{Reranker cross-encoder} : activation du reranking Cohere pour améliorer
+  la précision du retrieval RAG sur les questions complexes.
+  \item \textbf{Évaluation offline du RAG} : mise en place d'un jeu de questions/réponses
+  de référence pour mesurer Recall@k et MRR avant et après chaque modification du
+  pipeline de retrieval.
+  \item \textbf{Support multilingue} : extension du classifieur d'intention et de la base
+  documentaire pour gérer les requêtes en arabe, fréquentes sur le marché tunisien.
+\end{itemize}
+
+En somme, ce projet pose les bases d'une solution intelligente, évolutive et opérationnelle
+pour la gestion automatisée de la relation commerciale sur Tunisie Numérique, et constitue
+un exemple concret d'intégration des technologies RAG dans un contexte métier réel.
+
+%============================================================
+% BIBLIOGRAPHIE
+%============================================================
+\chapter*{Bibliographie}
+\addcontentsline{toc}{chapter}{Bibliographie}
+\markboth{Bibliographie}{}
+
+\begin{enumerate}[label={[\arabic*]}, leftmargin=2.5em]
+  \item Lewis, P. et al. \textit{Retrieval-Augmented Generation for
+  Knowledge-Intensive NLP Tasks}. Advances in Neural Information Processing Systems
+  (NeurIPS), 2020.
+
+  \item Robertson, S., \& Zaragoza, H. \textit{The Probabilistic Relevance Framework:
+  BM25 and Beyond}. Foundations and Trends in Information Retrieval, 3(4), 333--389, 2009.
+
+  \item Cormack, G. V., Clarke, C. L. A., \& Buettcher, S. \textit{Reciprocal Rank
+  Fusion Outperforms Condorcet and Individual Rank Learning Methods}. SIGIR, 2009.
+
+  \item FastAPI Documentation. \url{https://fastapi.tiangolo.com}. (Dernier accès :
+  Juin 2025).
+
+  \item Next.js Documentation. \url{https://nextjs.org/docs}. (Dernier accès :
+  Juin 2025).
+
+  \item Qdrant Documentation. \url{https://qdrant.tech/documentation}. (Dernier accès :
+  Juin 2025).
+
+  \item Ollama GitHub Repository. \url{https://github.com/ollama/ollama}. (Dernier
+  accès : Juin 2025).
+
+  \item Docker Compose Documentation.
+  \url{https://docs.docker.com/compose}. (Dernier accès : Juin 2025).
+
+  \item PostgreSQL Documentation. \url{https://www.postgresql.org/docs}. (Dernier
+  accès : Juin 2025).
+
+  \item RFC 7519 — JSON Web Token (JWT). \url{https://datatracker.ietf.org/doc/html/rfc7519}.
+  (Dernier accès : Juin 2025).
+\end{enumerate}
+
+\end{document}
