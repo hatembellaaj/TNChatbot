@@ -173,6 +173,7 @@ export default function AdminPage() {
   const apiCandidates = useMemo(() => resolveApiBases(), []);
   const [apiBase, setApiBase] = useState<string | null>(null);
   const [password, setPassword] = useState("");
+  const [authToken, setAuthToken] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -263,7 +264,7 @@ export default function AdminPage() {
         "Impossible de charger les données sans mot de passe admin.",
       );
     }
-    const headers = { "X-Admin-Password": password };
+    const headers = { "Authorization": `Bearer ${authToken ?? password}` };
     const [overviewRes, conversationsRes, leadsRes, kbDocsRes, kbChunksRes] =
       await Promise.all([
       fetch(`${apiBase}/api/admin/overview`, { headers }),
@@ -332,7 +333,7 @@ export default function AdminPage() {
     setLoading(true);
     setError(null);
     try {
-      const headers = { "X-Admin-Password": password };
+      const headers = { "Authorization": `Bearer ${authToken ?? password}` };
       const searchParams = new URLSearchParams();
       if (kbDocumentFilter !== "all") {
         searchParams.set("document_id", kbDocumentFilter);
@@ -379,6 +380,10 @@ export default function AdminPage() {
       });
       if (!response.ok) {
         throw new Error("Mot de passe admin invalide.");
+      }
+      const loginData = await response.json();
+      if (loginData.token) {
+        setAuthToken(loginData.token);
       }
       setIsAuthenticated(true);
       await fetchAdminData();
@@ -503,7 +508,7 @@ export default function AdminPage() {
 
       const response = await fetch(`${apiBase}/api/admin/kb/ingestion/upload`, {
         method: "POST",
-        headers: { "X-Admin-Password": password },
+        headers: { "Authorization": `Bearer ${authToken ?? password}` },
         body: formData,
       });
       if (!response.ok) {
@@ -533,7 +538,7 @@ export default function AdminPage() {
       formData.append("file", ingestionFile);
       const response = await fetch(`${apiBase}/api/admin/kb/ingestion/upload/parse`, {
         method: "POST",
-        headers: { "X-Admin-Password": password },
+        headers: { "Authorization": `Bearer ${authToken ?? password}` },
         body: formData,
       });
       if (!response.ok) {
@@ -693,7 +698,7 @@ export default function AdminPage() {
     try {
       const response = await fetch(`${apiBase}/api/admin/kb/documents/${documentId}`, {
         method: "DELETE",
-        headers: { "X-Admin-Password": password },
+        headers: { "Authorization": `Bearer ${authToken ?? password}` },
       });
       if (!response.ok) {
         const message = await extractApiError(response, "Suppression du document impossible.");

@@ -1,10 +1,14 @@
+import base64
 import csv
+import hashlib
+import hmac
 import io
 import json
 import logging
 import os
 import queue
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List
@@ -27,6 +31,70 @@ from app.rag.ingest import (
 ADMIN_CONFIG_KEYS = ("audience_metrics", "offers_copy", "email_config", "sectors")
 LOGGER = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# JWT HS256 — implémentation stdlib (pas de dépendance externe)
+# ---------------------------------------------------------------------------
+
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _b64url_decode(s: str) -> bytes:
+    padding = 4 - len(s) % 4
+    if padding != 4:
+        s += "=" * padding
+    return base64.urlsafe_b64decode(s)
+
+
+def _jwt_secret() -> str:
+    secret = os.getenv("JWT_SECRET") or os.getenv("ADMIN_PASSWORD")
+    if not secret:
+        raise HTTPException(status_code=500, detail="JWT_SECRET non configuré")
+    return secret
+
+
+def _encode_jwt() -> str:
+    secret = _jwt_secret()
+    ttl_minutes = int(os.getenv("JWT_TTL_MINUTES", "60"))
+    header = _b64url_encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    now = int(time.time())
+    payload = _b64url_encode(json.dumps({
+        "sub": "admin",
+        "iat": now,
+        "exp": now + ttl_minutes * 60,
+    }).encode())
+    signing_input = f"{header}.{payload}"
+    sig = _b64url_encode(
+        hmac.new(secret.encode(), signing_input.encode(), hashlib.sha256).digest()
+    )
+    return f"{signing_input}.{sig}"
+
+
+def _decode_jwt(token: str) -> dict:
+    """Vérifie et décode le JWT. Lève HTTPException 401 si invalide ou expiré."""
+    secret = _jwt_secret()
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise HTTPException(status_code=401, detail="Token invalide")
+    header_b64, payload_b64, sig_b64 = parts
+    signing_input = f"{header_b64}.{payload_b64}"
+    expected_sig = _b64url_encode(
+        hmac.new(secret.encode(), signing_input.encode(), hashlib.sha256).digest()
+    )
+    if not hmac.compare_digest(sig_b64, expected_sig):
+        raise HTTPException(status_code=401, detail="Token invalide")
+    try:
+        payload = json.loads(_b64url_decode(payload_b64))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Token invalide")
+    if payload.get("exp", 0) < int(time.time()):
+        raise HTTPException(status_code=401, detail="Token expiré")
+    return payload
+
+
+# ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
 
 def _get_admin_password() -> str:
     expected = os.getenv("ADMIN_PASSWORD")
@@ -43,7 +111,17 @@ def _ensure_admin_password(password: str | None) -> None:
 
 def require_admin_password(
     x_admin_password: str | None = Header(None),
+    authorization: str | None = Header(None),
 ) -> None:
+    """
+    Accepte deux modes :
+    1. JWT Bearer  : Authorization: Bearer <token>   (recommandé)
+    2. Mot de passe statique : X-Admin-Password: <mdp>  (backward compat)
+    """
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.removeprefix("Bearer ").strip()
+        _decode_jwt(token)
+        return
     _ensure_admin_password(x_admin_password)
 
 
@@ -52,10 +130,17 @@ router = APIRouter(dependencies=[Depends(require_admin_password)])
 
 
 @auth_router.post("/api/admin/login")
-def login_admin(payload: Dict[str, str] = Body(...)) -> Dict[str, bool]:
+def login_admin(payload: Dict[str, str] = Body(...)) -> Dict[str, Any]:
     _ensure_admin_password(payload.get("password"))
-    return {"ok": True}
+    ttl_minutes = int(os.getenv("JWT_TTL_MINUTES", "60"))
+    token = _encode_jwt()
+    LOGGER.info("audit action=login status=success")
+    return {"ok": True, "token": token, "expires_in": ttl_minutes * 60}
 
+
+# ---------------------------------------------------------------------------
+# Config métier
+# ---------------------------------------------------------------------------
 
 def load_admin_config(keys: Iterable[str] = ADMIN_CONFIG_KEYS) -> Dict[str, Any]:
     config: Dict[str, Any] = {}
@@ -85,6 +170,7 @@ def _upsert_config(key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
                 """,
                 (key, json.dumps(payload)),
             )
+    LOGGER.info("audit action=config_update key=%s", key)
     return payload
 
 
@@ -138,6 +224,10 @@ def put_sectors(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     return {"key": "sectors", "value": _upsert_config("sectors", payload)}
 
 
+# ---------------------------------------------------------------------------
+# Leads
+# ---------------------------------------------------------------------------
+
 @router.get("/api/admin/leads")
 def get_leads(format: str | None = Query(default=None)) -> Any:
     with get_connection() as conn:
@@ -154,44 +244,24 @@ def get_leads(format: str | None = Query(default=None)) -> Any:
 
     leads: List[Dict[str, Any]] = []
     for row in rows:
-        (
-            lead_id,
-            full_name,
-            company,
-            email,
-            phone,
-            entry_path,
-            lead_type,
-            extra_json,
-            created_at,
-        ) = row
-        leads.append(
-            {
-                "id": str(lead_id),
-                "full_name": full_name,
-                "company": company,
-                "email": email,
-                "phone": phone,
-                "entry_path": entry_path,
-                "lead_type": lead_type,
-                "extra_json": extra_json or {},
-                "created_at": created_at.isoformat() if created_at else None,
-            }
-        )
+        (lead_id, full_name, company, email, phone,
+         entry_path, lead_type, extra_json, created_at) = row
+        leads.append({
+            "id": str(lead_id),
+            "full_name": full_name,
+            "company": company,
+            "email": email,
+            "phone": phone,
+            "entry_path": entry_path,
+            "lead_type": lead_type,
+            "extra_json": extra_json or {},
+            "created_at": created_at.isoformat() if created_at else None,
+        })
 
     if format and format.lower() == "csv":
         buffer = io.StringIO()
-        fieldnames = [
-            "id",
-            "full_name",
-            "company",
-            "email",
-            "phone",
-            "entry_path",
-            "lead_type",
-            "extra_json",
-            "created_at",
-        ]
+        fieldnames = ["id", "full_name", "company", "email", "phone",
+                      "entry_path", "lead_type", "extra_json", "created_at"]
         writer = csv.DictWriter(buffer, fieldnames=fieldnames)
         writer.writeheader()
         for lead in leads:
@@ -199,11 +269,15 @@ def get_leads(format: str | None = Query(default=None)) -> Any:
             row["extra_json"] = json.dumps(row["extra_json"], ensure_ascii=False)
             writer.writerow(row)
         buffer.seek(0)
-        headers = {"Content-Disposition": "attachment; filename=leads.csv"}
-        return StreamingResponse(buffer, media_type="text/csv", headers=headers)
+        return StreamingResponse(buffer, media_type="text/csv",
+                                 headers={"Content-Disposition": "attachment; filename=leads.csv"})
 
     return {"count": len(leads), "items": leads}
 
+
+# ---------------------------------------------------------------------------
+# Overview & conversations
+# ---------------------------------------------------------------------------
 
 @router.get("/api/admin/overview")
 def get_overview() -> Dict[str, Any]:
@@ -248,10 +322,9 @@ def get_conversations(
                 (limit, offset),
             )
             sessions = cur.fetchall()
-
             session_ids = [row[0] for row in sessions]
             messages_by_session: Dict[str, List[Dict[str, Any]]] = {
-                str(session_id): [] for session_id in session_ids
+                str(sid): [] for sid in session_ids
             }
             if session_ids:
                 cur.execute(
@@ -263,29 +336,29 @@ def get_conversations(
                     """,
                     (session_ids,),
                 )
-                for session_id, role, content, step, created_at in cur.fetchall():
-                    messages_by_session[str(session_id)].append(
-                        {
-                            "role": role,
-                            "content": content,
-                            "step": step,
-                            "created_at": created_at.isoformat()
-                            if created_at
-                            else None,
-                        }
-                    )
+                for sid, role, content, step, created_at in cur.fetchall():
+                    messages_by_session[str(sid)].append({
+                        "role": role,
+                        "content": content,
+                        "step": step,
+                        "created_at": created_at.isoformat() if created_at else None,
+                    })
 
     items = [
         {
-            "session_id": str(session_id),
+            "session_id": str(sid),
             "step": step,
             "created_at": created_at.isoformat() if created_at else None,
-            "messages": messages_by_session.get(str(session_id), []),
+            "messages": messages_by_session.get(str(sid), []),
         }
-        for session_id, step, created_at in sessions
+        for sid, step, created_at in sessions
     ]
     return {"total": total, "count": len(items), "items": items}
 
+
+# ---------------------------------------------------------------------------
+# Base de connaissances
+# ---------------------------------------------------------------------------
 
 @router.get("/api/admin/kb/documents")
 def get_kb_documents(
@@ -311,32 +384,19 @@ def get_kb_documents(
             rows = cur.fetchall()
 
     items = []
-    for (
-        document_id,
-        source_type,
-        source_uri,
-        title,
-        status,
-        created_at,
-        updated_at,
-        chunk_count,
-    ) in rows:
-        items.append(
-            {
-                "id": str(document_id),
-                "source_type": source_type,
-                "source_uri": source_uri,
-                "title": title,
-                "status": status,
-                "created_at": created_at.isoformat() if created_at else None,
-                "updated_at": updated_at.isoformat() if updated_at else None,
-                "chunk_count": chunk_count,
-            }
-        )
-
+    for (doc_id, source_type, source_uri, title, status,
+         created_at, updated_at, chunk_count) in rows:
+        items.append({
+            "id": str(doc_id),
+            "source_type": source_type,
+            "source_uri": source_uri,
+            "title": title,
+            "status": status,
+            "created_at": created_at.isoformat() if created_at else None,
+            "updated_at": updated_at.isoformat() if updated_at else None,
+            "chunk_count": chunk_count,
+        })
     return {"total": total, "count": len(items), "items": items}
-
-
 
 
 @router.delete("/api/admin/kb/documents/{document_id}")
@@ -348,11 +408,14 @@ def delete_kb_document(document_id: str) -> Dict[str, Any]:
             if not row:
                 raise HTTPException(status_code=404, detail="Document introuvable")
             doc_id, title = row
-
             cur.execute("SELECT id FROM kb_chunks WHERE document_id = %s", (doc_id,))
-            chunk_ids = [str(chunk_id) for (chunk_id,) in cur.fetchall()]
-
+            chunk_ids = [str(cid) for (cid,) in cur.fetchall()]
             cur.execute("DELETE FROM kb_documents WHERE id = %s", (doc_id,))
+
+    LOGGER.info(
+        "audit action=delete_kb_document document_id=%s title=%s chunks=%s",
+        doc_id, title, len(chunk_ids),
+    )
 
     qdrant_deleted = True
     qdrant_error: str | None = None
@@ -363,10 +426,8 @@ def delete_kb_document(document_id: str) -> Dict[str, Any]:
             qdrant_deleted = False
             qdrant_error = str(exc)
             LOGGER.warning(
-                "kb_document_delete_qdrant_failed document_id=%s chunks=%s error=%s",
-                doc_id,
-                len(chunk_ids),
-                exc,
+                "audit action=delete_kb_document_qdrant_failed document_id=%s chunks=%s error=%s",
+                doc_id, len(chunk_ids), exc,
             )
 
     response: Dict[str, Any] = {
@@ -383,6 +444,7 @@ def delete_kb_document(document_id: str) -> Dict[str, Any]:
         )
         response["qdrant_error"] = qdrant_error
     return response
+
 
 @router.get("/api/admin/kb/chunks")
 def get_kb_chunks(
@@ -403,12 +465,8 @@ def get_kb_chunks(
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                f"SELECT COUNT(*) FROM kb_chunks c {where_clause}",
-                tuple(params),
-            )
+            cur.execute(f"SELECT COUNT(*) FROM kb_chunks c {where_clause}", tuple(params))
             total = cur.fetchone()[0]
-            params_with_paging = params + [limit, offset]
             cur.execute(
                 f"""
                 SELECT c.id, c.document_id, c.chunk_index, c.content, c.token_count,
@@ -419,36 +477,29 @@ def get_kb_chunks(
                 ORDER BY c.created_at DESC
                 LIMIT %s OFFSET %s
                 """,
-                tuple(params_with_paging),
+                tuple(params + [limit, offset]),
             )
             rows = cur.fetchall()
 
     items = []
-    for (
-        chunk_id,
-        doc_id,
-        chunk_index,
-        content,
-        token_count,
-        created_at,
-        title,
-        source_uri,
-    ) in rows:
-        items.append(
-            {
-                "id": str(chunk_id),
-                "document_id": str(doc_id),
-                "chunk_index": chunk_index,
-                "content": content,
-                "token_count": token_count,
-                "created_at": created_at.isoformat() if created_at else None,
-                "title": title,
-                "source_uri": source_uri,
-            }
-        )
-
+    for (cid, doc_id, chunk_index, content, token_count,
+         created_at, title, source_uri) in rows:
+        items.append({
+            "id": str(cid),
+            "document_id": str(doc_id),
+            "chunk_index": chunk_index,
+            "content": content,
+            "token_count": token_count,
+            "created_at": created_at.isoformat() if created_at else None,
+            "title": title,
+            "source_uri": source_uri,
+        })
     return {"total": total, "count": len(items), "items": items}
 
+
+# ---------------------------------------------------------------------------
+# Ingestion helpers
+# ---------------------------------------------------------------------------
 
 def _normalize_chunk_params(chunk_size: int | None, overlap: int | None) -> tuple[int, int]:
     resolved_chunk_size = chunk_size or int(os.getenv("RAG_CHUNK_SIZE", "200"))
@@ -458,13 +509,8 @@ def _normalize_chunk_params(chunk_size: int | None, overlap: int | None) -> tupl
     if resolved_overlap < 0:
         raise HTTPException(status_code=400, detail="overlap doit être supérieur ou égal à 0")
     if resolved_overlap >= resolved_chunk_size:
-        raise HTTPException(
-            status_code=400,
-            detail="overlap doit être strictement inférieur à chunk_size",
-        )
+        raise HTTPException(status_code=400, detail="overlap doit être strictement inférieur à chunk_size")
     return resolved_chunk_size, resolved_overlap
-
-
 
 
 def _ingest_document(
@@ -477,6 +523,10 @@ def _ingest_document(
     source_type: str = "admin",
     report: Callable[[str, Dict[str, Any]], None] | None = None,
 ) -> Dict[str, Any]:
+    LOGGER.info(
+        "audit action=ingestion_start title=%s source_uri=%s source_type=%s",
+        title, source_uri, source_type,
+    )
     if report:
         report("chunking_started", {"chunk_size": chunk_size, "overlap": overlap})
     chunks = chunk_text(content, chunk_size, overlap)
@@ -526,29 +576,25 @@ def _ingest_document(
                 """,
                 (chunk_id, doc_id, index, chunk, json.dumps(embedding), token_count),
             )
-            rows.append(
-                {
-                    "chunk_id": str(chunk_id),
+            rows.append({
+                "chunk_id": str(chunk_id),
+                "chunk_index": index,
+                "token_count": token_count,
+                "content_preview": chunk[:220],
+                "embedding_dimension": len(embedding),
+            })
+            points.append({
+                "id": str(chunk_id),
+                "vector": embedding,
+                "payload": {
+                    "document_id": str(doc_id),
                     "chunk_index": index,
-                    "token_count": token_count,
-                    "content_preview": chunk[:220],
-                    "embedding_dimension": len(embedding),
-                }
-            )
-            points.append(
-                {
-                    "id": str(chunk_id),
-                    "vector": embedding,
-                    "payload": {
-                        "document_id": str(doc_id),
-                        "chunk_index": index,
-                        "content": chunk,
-                        "intent": intent,
-                        "source_uri": source_uri,
-                        "title": title,
-                    },
-                }
-            )
+                    "content": chunk,
+                    "intent": intent,
+                    "source_uri": source_uri,
+                    "title": title,
+                },
+            })
 
         if report:
             report("database_chunks_inserted", {"rows": len(rows)})
@@ -562,17 +608,15 @@ def _ingest_document(
         )
         conn.execute(
             """
-            UPDATE kb_ingestion_runs
-            SET status = %s, finished_at = NOW(), stats = %s
-            WHERE id = %s
+            UPDATE kb_ingestion_runs SET status = %s, finished_at = NOW(), stats = %s WHERE id = %s
             """,
-            (
-                "finished",
-                json.dumps({"documents": 1, "chunks": len(rows), "skipped": 0}),
-                run_id,
-            ),
+            ("finished", json.dumps({"documents": 1, "chunks": len(rows), "skipped": 0}), run_id),
         )
 
+    LOGGER.info(
+        "audit action=ingestion_complete run_id=%s document_id=%s title=%s chunks=%s",
+        run_id, doc_id, title, len(rows),
+    )
     if report:
         report("ingestion_completed", {"run_id": str(run_id), "document_id": str(doc_id), "chunks": len(rows)})
 
@@ -589,10 +633,8 @@ def _ingest_document(
 def _decode_upload_content(upload: UploadFile, raw_content: bytes) -> str:
     if not raw_content:
         raise HTTPException(status_code=400, detail="Le fichier uploadé est vide")
-
     content_type = (upload.content_type or "").lower()
     filename = (upload.filename or "").lower()
-
     try:
         if "pdf" in content_type or filename.endswith(".pdf"):
             reader = PdfReader(io.BytesIO(raw_content))
@@ -601,7 +643,6 @@ def _decode_upload_content(upload: UploadFile, raw_content: bytes) -> str:
             if not content:
                 raise HTTPException(status_code=400, detail="Aucun texte exploitable trouvé dans le PDF")
             return content
-
         if "jsonl" in content_type or filename.endswith(".jsonl"):
             lines = raw_content.decode("utf-8").splitlines()
             parsed_lines = []
@@ -611,16 +652,11 @@ def _decode_upload_content(upload: UploadFile, raw_content: bytes) -> str:
                 try:
                     parsed_lines.append(json.dumps(json.loads(line), ensure_ascii=False, indent=2))
                 except json.JSONDecodeError as exc:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"JSONL invalide à la ligne {index}",
-                    ) from exc
+                    raise HTTPException(status_code=400, detail=f"JSONL invalide à la ligne {index}") from exc
             return "\n\n".join(parsed_lines)
-
         if "json" in content_type or filename.endswith(".json"):
             parsed = json.loads(raw_content.decode("utf-8"))
             return json.dumps(parsed, ensure_ascii=False, indent=2)
-
         return raw_content.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise HTTPException(
@@ -635,7 +671,6 @@ def _transform_content_to_toon(content: str) -> str:
     paragraphs = [block.strip() for block in content.split("\n\n") if block.strip()]
     if not paragraphs:
         raise HTTPException(status_code=400, detail="Le contenu à transformer est vide")
-
     transformed: List[str] = []
     for paragraph in paragraphs:
         lines = [line.strip() for line in paragraph.splitlines() if line.strip()]
@@ -643,6 +678,10 @@ def _transform_content_to_toon(content: str) -> str:
         transformed.append("\n".join(transformed_lines))
     return "\n\n".join(transformed)
 
+
+# ---------------------------------------------------------------------------
+# Endpoints ingestion
+# ---------------------------------------------------------------------------
 
 @router.post("/api/admin/kb/ingestion/upload/parse")
 async def parse_ingestion_upload(file: UploadFile = File(...)) -> Dict[str, Any]:
@@ -678,7 +717,6 @@ def preview_ingestion(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     source_uri = str(payload.get("source_uri") or title)
     include_embeddings = bool(payload.get("include_embeddings", True))
     chunk_size, overlap = _normalize_chunk_params(payload.get("chunk_size"), payload.get("overlap"))
-
     if not content.strip():
         raise HTTPException(status_code=400, detail="Le contenu du document est vide")
 
@@ -686,14 +724,12 @@ def preview_ingestion(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     chunks = chunk_text(content, chunk_size, overlap)
     preview_chunks: List[Dict[str, Any]] = []
     for index, chunk in enumerate(chunks):
-        preview_chunks.append(
-            {
-                "chunk_index": index,
-                "content": chunk,
-                "token_count": estimate_tokens(chunk),
-                "char_count": len(chunk),
-            }
-        )
+        preview_chunks.append({
+            "chunk_index": index,
+            "content": chunk,
+            "token_count": estimate_tokens(chunk),
+            "char_count": len(chunk),
+        })
 
     embeddings: List[List[float]] = []
     embedding_dimension = 0
@@ -711,27 +747,12 @@ def preview_ingestion(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
             preview_chunks[index]["embedding_preview"] = values[:8]
 
     return {
-        "document": {
-            "title": title,
-            "source_uri": source_uri,
-            "char_count": len(content),
-            "token_estimate": estimate_tokens(content),
-        },
-        "params": {
-            "chunk_size": chunk_size,
-            "overlap": overlap,
-            "include_embeddings": include_embeddings,
-        },
-        "split": {
-            "block_count": len(split_blocks),
-            "blocks": split_blocks,
-        },
+        "document": {"title": title, "source_uri": source_uri,
+                     "char_count": len(content), "token_estimate": estimate_tokens(content)},
+        "params": {"chunk_size": chunk_size, "overlap": overlap, "include_embeddings": include_embeddings},
+        "split": {"block_count": len(split_blocks), "blocks": split_blocks},
         "chunks": preview_chunks,
-        "embeddings": {
-            "generated": include_embeddings,
-            "count": len(embeddings),
-            "dimension": embedding_dimension,
-        },
+        "embeddings": {"generated": include_embeddings, "count": len(embeddings), "dimension": embedding_dimension},
     }
 
 
@@ -741,20 +762,10 @@ def run_ingestion(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     content = str(payload.get("content") or "")
     source_uri = str(payload.get("source_uri") or title)
     chunk_size, overlap = _normalize_chunk_params(payload.get("chunk_size"), payload.get("overlap"))
-
     if not content.strip():
         raise HTTPException(status_code=400, detail="Le contenu du document est vide")
-
-    return _ingest_document(
-        title=title,
-        source_uri=source_uri,
-        content=content,
-        chunk_size=chunk_size,
-        overlap=overlap,
-        source_type="admin",
-    )
-
-
+    return _ingest_document(title=title, source_uri=source_uri, content=content,
+                            chunk_size=chunk_size, overlap=overlap, source_type="admin")
 
 
 @router.post("/api/admin/kb/ingestion/run/stream")
@@ -763,7 +774,6 @@ def run_ingestion_stream(payload: Dict[str, Any] = Body(...)) -> StreamingRespon
     content = str(payload.get("content") or "")
     source_uri = str(payload.get("source_uri") or title)
     chunk_size, overlap = _normalize_chunk_params(payload.get("chunk_size"), payload.get("overlap"))
-
     if not content.strip():
         raise HTTPException(status_code=400, detail="Le contenu du document est vide")
 
@@ -777,15 +787,9 @@ def run_ingestion_stream(payload: Dict[str, Any] = Body(...)) -> StreamingRespon
         def worker() -> None:
             try:
                 push("ingestion_started", {"title": title, "source_uri": source_uri})
-                result = _ingest_document(
-                    title=title,
-                    source_uri=source_uri,
-                    content=content,
-                    chunk_size=chunk_size,
-                    overlap=overlap,
-                    source_type="admin",
-                    report=push,
-                )
+                result = _ingest_document(title=title, source_uri=source_uri, content=content,
+                                          chunk_size=chunk_size, overlap=overlap,
+                                          source_type="admin", report=push)
                 push("result", result)
             except HTTPException as exc:
                 push("error", {"detail": exc.detail, "status_code": exc.status_code})
@@ -795,7 +799,6 @@ def run_ingestion_stream(payload: Dict[str, Any] = Body(...)) -> StreamingRespon
                 events.put(None)
 
         threading.Thread(target=worker, daemon=True).start()
-
         while True:
             item = events.get()
             if item is None:
@@ -817,16 +820,8 @@ async def run_ingestion_upload(
     filename = (file.filename or "document.txt").strip()
     resolved_title = (title or Path(filename).stem).strip() or "Document"
     resolved_source_uri = (source_uri or f"admin/upload/{filename}").strip() or f"admin/upload/{filename}"
-
     content = _decode_upload_content(file, await file.read())
     if not content.strip():
         raise HTTPException(status_code=400, detail="Le contenu du document est vide")
-
-    return _ingest_document(
-        title=resolved_title,
-        source_uri=resolved_source_uri,
-        content=content,
-        chunk_size=resolved_chunk_size,
-        overlap=resolved_overlap,
-        source_type="upload",
-    )
+    return _ingest_document(title=resolved_title, source_uri=resolved_source_uri, content=content,
+                            chunk_size=resolved_chunk_size, overlap=resolved_overlap, source_type="upload")
